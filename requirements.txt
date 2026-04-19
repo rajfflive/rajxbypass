@@ -4,3 +4,6 @@ cloudscraper
 flask
 pymongo
 dnspython
+aiogram
+cloudscraper
+flask
