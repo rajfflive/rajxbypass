@@ -1,9 +1,6 @@
-pyrogram
-tgcrypto
-cloudscraper
-flask
-pymongo
-dnspython
 aiogram
 cloudscraper
 flask
+motor
+dnspython
+pymongo
