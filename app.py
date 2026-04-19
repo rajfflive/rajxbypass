@@ -36,72 +36,62 @@ async def check_force_join(user_id):
     for channel in CHANNELS:
         try:
             member = await bot.get_chat_member(f"@{channel}", user_id)
-            if member.status in ["left", "kicked"]:
-                return False
-        except Exception:
-            return False
+            if member.status in ["left", "kicked"]: return False
+        except Exception: return False
     return True
 
-# ==================== START COMMAND ====================
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    builder = InlineKeyboardBuilder()
-    # Emojis hatakar wahi style buttons jo aapne mange the
-    builder.row(InlineKeyboardButton(text="Primary (Blue)", url="https://t.me/rajxcheats"))
-    builder.row(InlineKeyboardButton(text="Success (Green)", url="https://t.me/ffofcchat"))
-    builder.row(InlineKeyboardButton(text="Danger (Red)", url=f"https://t.me/rajfflive"))
-
-    welcome_text = (
-        f"🏎️ <b>RAJX BYPASS BOT</b> ⚡\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
-        f"📍 <b>Status:</b> I work only in Groups!\n"
-        f"🚀 <b>Service:</b> High Speed Bypassing\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👑 <b>Owner:</b> {DEV_HANDLE}"
-    )
-    await message.reply(welcome_text, reply_markup=builder.as_markup())
-
-# ==================== BYPASS HANDLER (GROUP ONLY) ====================
+# ==================== BYPASS HANDLER ====================
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    # 1. GROUP ONLY CHECK
+    # Group Only Check
     if message.chat.type == "private":
-        return await message.reply("❌ <b>Access Denied!</b>\n\nMain sirf <b>Groups</b> mein kaam karta hoon. Mujhe group mein add karein!")
+        return await message.reply("❌ <b>Group Work Only!</b>\nMujhe kisi group mein add karein.")
 
     user_id = message.from_user.id
     link = message.text.strip()
 
-    # 2. Force Join Check
+    # Force Join Check
     if not await check_force_join(user_id):
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="Join Updates", url="https://t.me/rajxcheats"))
+        builder.row(InlineKeyboardButton(text="Join Channel", url="https://t.me/rajxcheats"))
         builder.row(InlineKeyboardButton(text="Join Group", url="https://t.me/ffofcchat"))
         builder.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify"))
-        
-        return await message.reply(
-            "⚠️ <b>Join our channels first to use me!</b>",
-            reply_markup=builder.as_markup()
-        )
+        return await message.reply("⚠️ <b>Join our channels first!</b>", reply_markup=builder.as_markup())
 
-    # 3. Loading UI
-    status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<b>ꜱᴇᴀʀᴄʜɪɴɢ ⚡</b>")
-    await asyncio.sleep(0.3)
-    await status_msg.edit_text("█████████░░░░  68%\n<b>ɢᴇᴛᴛɪɴɢ ʀᴇsᴜʟᴛ ⚡</b>")
+    # --- SUPER DETAILED 10% TO 100% PROCESSING ---
+    status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<b>Connecting... ⏳</b>")
     
+    stages = [
+        ("█░░░░░░░░░░░░  10%", "<b>Checking Link Security... 🛡️</b>"),
+        ("██░░░░░░░░░░░  25%", "<b>Fetching Server Info... 🛰️</b>"),
+        ("████░░░░░░░░░  45%", "<b>Bypassing Cloudflare... ⛈️</b>"),
+        ("██████░░░░░░░  60%", "<b>Extracting Destination... 📂</b>"),
+        ("████████░░░░░  85%", "<b>Bypassing Shortlinks... ⚡</b>"),
+        ("██████████░░░  95%", "<b>Finalizing Results... 🚀</b>"),
+        ("█████████████  100%", "<b>Success! ✅</b>")
+    ]
+    
+    for bar, text in stages:
+        await asyncio.sleep(0.3) # Isko badha kar processing aur slow/badi kar sakte ho
+        await status_msg.edit_text(f"{bar}\n{text}")
+
     start_time = time.perf_counter()
 
     try:
+        # API Request
         response = scraper.get(f"{PAID_API}&link={link}", timeout=30)
         data = response.json()
-        bypassed_url = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
         
+        # Clean Link Extraction
+        raw_res = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
+        bypassed_url = raw_res.get("bypassed") if isinstance(raw_res, dict) else raw_res
+
         if not bypassed_url:
-            return await status_msg.edit_text("❌ <b>Bypass Error!</b>\nLink not supported.")
+            return await status_msg.edit_text("❌ <b>Bypass Failed!</b>\nLink not supported by API.")
 
         time_taken = round(time.perf_counter() - start_time, 2)
 
-        # 4. FINAL CLEAN UI
+        # FINAL PREMIUM UI
         ui_text = (
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🏎️ <b>RAJX BYPASS BOT</b> ⚡\n"
@@ -121,26 +111,28 @@ async def handle_bypass(message: types.Message):
         
         await status_msg.edit_text(ui_text, disable_web_page_preview=True)
 
-    except Exception as e:
-        await status_msg.edit_text(f"❌ <b>Error:</b> <code>{str(e)[:50]}</code>")
+    except Exception:
+        await status_msg.edit_text("❌ <b>API Timeout!</b>\nServer busy, try again later.")
 
-# ==================== VERIFY CALLBACK ====================
+# ==================== VERIFY & START ====================
 @dp.callback_query(F.data == "verify")
 async def verify_user(callback: types.CallbackQuery):
     if await check_force_join(callback.from_user.id):
-        await callback.answer("✅ Verified! Now send the link in Group.", show_alert=True)
+        await callback.answer("✅ Verified!", show_alert=True)
         await callback.message.delete()
     else:
-        await callback.answer("❌ Join both channels first!", show_alert=True)
+        await callback.answer("❌ Join both first!", show_alert=True)
 
-# ==================== MAIN START ====================
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="Join Channel", url="https://t.me/rajxcheats"))
+    builder.row(InlineKeyboardButton(text="Join Group", url="https://t.me/ffofcchat"))
+    await message.reply(f"🏎️ <b>RAJX BYPASS BOT</b>\n━━━━━━━━━━━━━\nAdd me to group to use me!", reply_markup=builder.as_markup())
+
 async def main():
     Thread(target=run_server, daemon=True).start()
-    print("🚀 Group-Only Bot Started!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception:
-        pass
+    asyncio.run(main())
