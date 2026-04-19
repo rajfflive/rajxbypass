@@ -2,6 +2,7 @@ import os
 import asyncio
 import time
 import cloudscraper
+import json
 from flask import Flask
 from threading import Thread
 from aiogram import Bot, Dispatcher, types, F
@@ -11,19 +12,18 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import InlineKeyboardButton
 
 # ==================== CONFIGURATION ====================
+# TOKEN yahan se replace karein agar environment variable use nahi kar rahe
 TOKEN = os.environ.get("BOT_TOKEN", "7944388044:AAEI_DMgZmczKN4YCdmjlyjSUNJvHRGbvPI")
-PAID_API = "https://trycloudflare.com"
+PAID_API = "https://detect-shirt-generations-prepaid.trycloudflare.com/bypass?key=ccd271950940c3045784da88a1d3276e"
 
-# Channels for Force Join
-CHANNELS = ["rajxcheats", "ffofcchat"] 
-GROUP_LINK = "https://t.me"
+CHANNELS = ["ffofcchat", "rajxcheats"] 
+GROUP_LINK = "https://t.me/ffofcchat"
 DEV_HANDLE = "@rajxcheats"
 API_CREDIT = "@RAJFFLIVE"
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
-# Improved scraper with browser emulation to avoid 403 errors
-scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'android', 'desktop': False})
+scraper = cloudscraper.create_scraper()
 
 # ==================== RENDER LIVE FIX ====================
 server = Flask(__name__)
@@ -46,101 +46,112 @@ async def check_force_join(user_id):
 # ==================== BYPASS HANDLER ====================
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    user_id = message.from_user.id
-    
-    # Force Join Check
-    if not await check_force_join(user_id):
-        builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="Join Channel 📢", url="https://t.me/rajxcheats"))
-        builder.row(InlineKeyboardButton(text="Join Group 💬", url="t.me/ffofcchat"))
-        # PRIMARY (Blue) button for Verification
-        builder.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="primary"))
-        return await message.reply("<blockquote>⚠️ <b>Pehle hamare channels join karein tabhi main kaam karunga!</b></blockquote>", reply_markup=builder.as_markup())
-
-    # --- PRIVATE CHAT REDIRECT ---
+    # Personal Chat Redirect (Group Only Mode)
     if message.chat.type == "private":
         builder = InlineKeyboardBuilder()
-        # SUCCESS (Green) button for Redirect
-        builder.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
+        builder.row(InlineKeyboardButton(text="🟢 USE HERE 🟢", url=GROUP_LINK))
         return await message.reply(
-            "<blockquote>❌ <b>Personal Chat allowed nahi hai!</b>\n\nBypass karne ke liye niche button par click karke group join karein.</blockquote>",
+            "<blockquote>❌ <b>Direct Bypass Not Allowed!</b>\n\nNiche diye gaye button par click karke mere Group mein link send karein.</blockquote>",
             reply_markup=builder.as_markup()
         )
 
+    user_id = message.from_user.id
     link = message.text.strip()
-    status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Connecting to Server... ⏳</b></blockquote>")
+
+    # Force Join Check
+    if not await check_force_join(user_id):
+        builder = InlineKeyboardBuilder()
+        builder.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats"))
+        builder.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK))
+        builder.row(InlineKeyboardButton(text="🔵 Verify ✅", callback_data="verify"))
+        return await message.reply("<blockquote>⚠️ <b>Join our channels first to use me!</b></blockquote>", reply_markup=builder.as_markup())
+
+    # --- PROGRESS ANIMATION (More Detailed) ---
+    status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Connecting... ⚡</b></blockquote>")
     
-    # Progress Bar Animation
     stages = [
-        ("█░░░░░░░░░░░░  15%", "<blockquote><b>Fetching Server Details... 🛰️</b></blockquote>"),
-        ("█████░░░░░░░░  45%", "<blockquote><b>Bypassing Security... ⛈️</b></blockquote>"),
-        ("██████████░░░  85%", "<blockquote><b>Generating Link... 🚀</b></blockquote>"),
-        ("█████████████  100%", "<blockquote><b>Bypass Successful! ✅</b></blockquote>")
+        ("█░░░░░░░░░░░░  10%", "<blockquote><b>Fetching API Data... 🛰️</b></blockquote>"),
+        ("████░░░░░░░░░  45%", "<blockquote><b>Bypassing Restrictions... ⛈️</b></blockquote>"),
+        ("█████████████  100%", "<blockquote><b>Bypass Success! ✅</b></blockquote>")
     ]
     
     for bar, text in stages:
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.4)
         try: await status_msg.edit_text(f"{bar}\n{text}")
         except: pass
 
     start_time = time.perf_counter()
 
     try:
+        # API CALL WITH 30s TIMEOUT
         response = scraper.get(f"{PAID_API}&link={link}", timeout=30)
-        # Handle cases where API returns non-JSON or error codes
-        if response.status_code != 200:
-            return await status_msg.edit_text("<blockquote>❌ <b>API Error:</b> Server is busy or invalid link!</blockquote>")
-            
         data = response.json()
-        raw_res = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
-        bypassed_url = raw_res.get("bypassed") if isinstance(raw_res, dict) else raw_res
 
-        if not bypassed_url:
-            return await status_msg.edit_text("<blockquote>❌ <b>Bypass Failed:</b> Link not supported by API.</blockquote>")
+        # Clean Link Extraction (Loda Lassun Fix)
+        bypassed_url = None
+        if isinstance(data, dict):
+            # Checking all possible keys for the link
+            raw_res = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
+            # Handle nested dictionary if any
+            bypassed_url = raw_res.get("bypassed") if isinstance(raw_res, dict) else raw_res
+        
+        if not bypassed_url or not str(bypassed_url).startswith("http"):
+            return await status_msg.edit_text("<blockquote>❌ <b>Bypass Failed!</b>\nLink not supported or API limit exceeded.</blockquote>")
 
         time_taken = round(time.perf_counter() - start_time, 2)
 
+        # --- FINAL PREMIUM UI ---
         ui_text = (
+            "<blockquote>"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🏎️ <b>RAJX BYPASS BOT</b> ⚡\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🔗 <b>Original :</b>\n"
             f"<code>{link}</code>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🚀 <b>Bypassed :</b>\n"
             f"<b>{bypassed_url}</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🕒 <b>Time Taken :</b> <code>{time_taken}s</code>\n"
+            f"👤 <b>User :</b> {message.from_user.first_name}\n"
+            f"⚙️ <b>FOR API :</b> {API_CREDIT}\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"🕒 <b>Time :</b> <code>{time_taken}s</code> | 👤 <b>User :</b> {message.from_user.first_name}\n"
-            f"⚙️ <b>API BY :</b> {API_CREDIT}\n"
-            f"👑 <b>Owner :</b> {DEV_HANDLE}"
+            f"👑 <b>Owner :</b> {DEV_HANDLE} ✅"
+            "</blockquote>"
         )
         
         await status_msg.edit_text(ui_text, disable_web_page_preview=True)
 
-    except Exception as e:
-        await status_msg.edit_text(f"<blockquote>❌ <b>Error:</b> API response timeout! Fir se try karein.</blockquote>")
+    except Exception:
+        await status_msg.edit_text("<blockquote>❌ <b>Request Timeout!</b>\nAPI response nahi de rahi. 10 sec baad fir try karein.</blockquote>")
 
-# ==================== OTHER HANDLERS ====================
+# ==================== CALLBACKS ====================
 @dp.callback_query(F.data == "verify")
 async def verify_user(callback: types.CallbackQuery):
     if await check_force_join(callback.from_user.id):
-        await callback.answer("✅ Verification Success! Ab aap links bhej sakte hain.", show_alert=True)
+        await callback.answer("✅ Verified! You can bypass now.", show_alert=True)
         await callback.message.delete()
     else:
-        await callback.answer("❌ Abhi tak join nahi kiya! Dono join karke Verify dabayein.", show_alert=True)
+        await callback.answer("❌ Join Dono Channels Pehle!", show_alert=True)
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="Join Channel", url="https://t.me/rajxcheats"))
-    builder.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url="t.me/ffofcchat", style="success"))
+    builder.row(InlineKeyboardButton(text="📢 Channel", url="https://t.me/rajxcheats"))
+    builder.row(InlineKeyboardButton(text="🟢 USE HERE 🟢", url=GROUP_LINK))
+    
     await message.reply(
-        f"🏎️ <b>RAJX BYPASS BOT</b>\n━━━━━━━━━━━━━\nAdd me to group to use me or send link here!", 
+        f"<blockquote>🏎️ <b>RAJX BYPASS BOT</b>\n━━━━━━━━━━━━━\nHello! I'm the fastest link bypasser. Add me to your group to use me!</blockquote>", 
         reply_markup=builder.as_markup()
     )
 
+# ==================== RUN BOT ====================
 async def main():
     Thread(target=run_server, daemon=True).start()
+    print(f"🚀 Bot Started Successfully for {DEV_HANDLE}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except: pass
