@@ -8,14 +8,15 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import InlineKeyboardButton
 
 # ==================== CONFIGURATION ====================
 TOKEN = os.environ.get("BOT_TOKEN", "7944388044:AAEI_DMgZmczKN4YCdmjlyjSUNJvHRGbvPI")
 PAID_API = "https://detect-shirt-generations-prepaid.trycloudflare.com/bypass?key=ccd271950940c3045784da88a1d3276e"
 
-CHANNELS = ["ffofcchat", "rajxcheats"]
+CHANNELS = ["ffofcchat", "rajxcheats"] # Channel & Group
 DEV_HANDLE = "@rajxcheats"
+API_CREDIT = "@RAJFFLIVE"
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
@@ -45,24 +46,21 @@ async def check_force_join(user_id):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     builder = InlineKeyboardBuilder()
-    # Colourful Emojis for "Buttons Color" feel
-    builder.row(types.InlineKeyboardButton(text="🔵 JOIN UPDATES", url="https://t.me/rajxcheats"))
-    builder.row(types.InlineKeyboardButton(text="🟢 ADD TO GROUP", url=f"http://t.me/{(await bot.get_me()).username}?startgroup=true"))
-    builder.row(
-        types.InlineKeyboardButton(text="🔴 SUPPORT", url="https://t.me/rajxcheats"),
-        types.InlineKeyboardButton(text="🟡 HELP", callback_data="help")
-    )
+    # Button Style matching your screenshot
+    builder.row(InlineKeyboardButton(text=" Join Updates", url="https://t.me/rajxcheats"))
+    builder.row(InlineKeyboardButton(text=" Main Group", url="https://t.me/ffofcchat"))
+    builder.row(InlineKeyboardButton(text=" Support", url=f"https://t.me/rajfflive"))
 
-    welcome_msg = (
+    welcome_text = (
         f"🚀 <b>Hello {message.from_user.first_name}!</b>\n\n"
         f"Welcome to <b>RAJX BYPASS BOT</b> ✅\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"The most powerful and fastest link bypasser on Telegram.\n\n"
-        f"✨ <b>Send me any link to start!</b>\n"
+        f"I can bypass almost any shortlink instantly.\n\n"
+        f"✨ <b>Send me a link to start!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"Powered By: <b>{DEV_HANDLE}</b>"
     )
-    await message.answer(welcome_msg, reply_markup=builder.as_markup())
+    await message.reply(welcome_text, reply_markup=builder.as_markup())
 
 # ==================== BYPASS HANDLER ====================
 @dp.message(F.text.startswith("http"))
@@ -70,33 +68,39 @@ async def handle_bypass(message: types.Message):
     user_id = message.from_user.id
     link = message.text.strip()
 
-    # 1. Force Join Check
+    # 1. Force Join & Verify Button
     if not await check_force_join(user_id):
         builder = InlineKeyboardBuilder()
-        for c in CHANNELS:
-            builder.row(types.InlineKeyboardButton(text=f"📢 Join @{c}", url=f"https://t.me/{c}"))
+        builder.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats"))
+        builder.row(InlineKeyboardButton(text="💬 Join Group", url="https://t.me/ffofcchat"))
+        builder.row(InlineKeyboardButton(text="✅ Verify Membership", callback_data="verify"))
         
-        return await message.answer(
-            "❌ <b>Access Denied!</b>\n\nYou must join our channels to use this bot.",
+        return await message.reply(
+            "❌ <b>Access Denied!</b>\n\nYou must join our Channel and Group to use this bot.",
             reply_markup=builder.as_markup()
         )
 
     # 2. Loading Animation
-    status_msg = await message.answer("░░░░░░░░░░░░░  0%\n<b>ꜱᴇᴀʀᴄʜɪɴɢ ⚡</b>")
-    await asyncio.sleep(0.5)
+    status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<b>ꜱᴇᴀʀᴄʜɪɴɢ ⚡</b>")
+    await asyncio.sleep(0.4)
     await status_msg.edit_text("█████████░░░░  68%\n<b>ɢᴇᴛᴛɪɴɢ ʀᴇsᴜʟᴛ ⚡</b>")
     
     start_time = time.perf_counter()
 
     try:
-        # API Call
-        response = scraper.get(f"{PAID_API}&link={link}", timeout=25)
+        # API Call (Fixed Extraction)
+        response = scraper.get(f"{PAID_API}&link={link}", timeout=30)
         data = response.json()
-        bypassed_url = data.get("bypassed", data.get("bypassed_url", "Error in Link"))
         
+        # Fixing the 'Bypass Error' by checking keys properly
+        bypassed_url = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
+        
+        if not bypassed_url:
+            return await status_msg.edit_text("❌ <b>Bypass Failed!</b>\nLink not supported or API limit reached.")
+
         time_taken = round(time.perf_counter() - start_time, 2)
 
-        # 3. Final Professional UI
+        # 3. Final Professional UI (Line Separated)
         ui_text = (
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🏎️ <b>RAJX BYPASS BOT</b> ⚡\n"
@@ -109,7 +113,7 @@ async def handle_bypass(message: types.Message):
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             f"🕒 <b>Time Taken :</b> <code>{time_taken}s</code>\n"
             f"👤 <b>User :</b> {message.from_user.first_name}\n"
-            "⚙️ <b>Status :</b> Success ✅\n\n"
+            f"⚙️ <b>FOR API :</b> {API_CREDIT}\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"👑 <b>Owner :</b> {DEV_HANDLE} ✅"
         )
@@ -117,18 +121,25 @@ async def handle_bypass(message: types.Message):
         await status_msg.edit_text(ui_text, disable_web_page_preview=True)
 
     except Exception as e:
-        await status_msg.edit_text(f"❌ <b>Error:</b> <code>{str(e)}</code>")
+        await status_msg.edit_text(f"❌ <b>Error:</b> <code>{str(e)[:100]}</code>")
+
+# ==================== VERIFY CALLBACK ====================
+@dp.callback_query(F.data == "verify")
+async def verify_user(callback: types.CallbackQuery):
+    if await check_force_join(callback.from_user.id):
+        await callback.answer("✅ Verified! You can now send links.", show_alert=True)
+        await callback.message.delete()
+    else:
+        await callback.answer("❌ You still haven't joined both channels!", show_alert=True)
 
 # ==================== MAIN START ====================
 async def main():
-    # Run Flask in background for Render
     Thread(target=run_server, daemon=True).start()
-    
-    print("🚀 Bot is Starting...")
+    print("🚀 Bot Started with @RAJFFLIVE Credit!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         print("Bot Stopped.")
