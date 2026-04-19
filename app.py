@@ -14,7 +14,7 @@ from aiogram.types import InlineKeyboardButton
 TOKEN = os.environ.get("BOT_TOKEN", "7944388044:AAEI_DMgZmczKN4YCdmjlyjSUNJvHRGbvPI")
 PAID_API = "https://detect-shirt-generations-prepaid.trycloudflare.com/bypass?key=ccd271950940c3045784da88a1d3276e"
 
-CHANNELS = ["ffofcchat", "rajxcheats"] # Channel & Group
+CHANNELS = ["ffofcchat", "rajxcheats"]
 DEV_HANDLE = "@rajxcheats"
 API_CREDIT = "@RAJFFLIVE"
 
@@ -42,65 +42,66 @@ async def check_force_join(user_id):
             return False
     return True
 
-# ==================== WELCOME MESSAGE ====================
+# ==================== START COMMAND ====================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     builder = InlineKeyboardBuilder()
-    # Button Style matching your screenshot
-    builder.row(InlineKeyboardButton(text=" Join Updates", url="https://t.me/rajxcheats"))
-    builder.row(InlineKeyboardButton(text=" Main Group", url="https://t.me/ffofcchat"))
-    builder.row(InlineKeyboardButton(text=" Support", url=f"https://t.me/rajfflive"))
+    # Emojis hatakar wahi style buttons jo aapne mange the
+    builder.row(InlineKeyboardButton(text="Primary (Blue)", url="https://t.me/rajxcheats"))
+    builder.row(InlineKeyboardButton(text="Success (Green)", url="https://t.me/ffofcchat"))
+    builder.row(InlineKeyboardButton(text="Danger (Red)", url=f"https://t.me/rajfflive"))
 
     welcome_text = (
-        f"🚀 <b>Hello {message.from_user.first_name}!</b>\n\n"
-        f"Welcome to <b>RAJX BYPASS BOT</b> ✅\n"
+        f"🏎️ <b>RAJX BYPASS BOT</b> ⚡\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👋 <b>Hello {message.from_user.first_name}!</b>\n\n"
+        f"📍 <b>Status:</b> I work only in Groups!\n"
+        f"🚀 <b>Service:</b> High Speed Bypassing\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"I can bypass almost any shortlink instantly.\n\n"
-        f"✨ <b>Send me a link to start!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Powered By: <b>{DEV_HANDLE}</b>"
+        f"👑 <b>Owner:</b> {DEV_HANDLE}"
     )
     await message.reply(welcome_text, reply_markup=builder.as_markup())
 
-# ==================== BYPASS HANDLER ====================
+# ==================== BYPASS HANDLER (GROUP ONLY) ====================
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
+    # 1. GROUP ONLY CHECK
+    if message.chat.type == "private":
+        return await message.reply("❌ <b>Access Denied!</b>\n\nMain sirf <b>Groups</b> mein kaam karta hoon. Mujhe group mein add karein!")
+
     user_id = message.from_user.id
     link = message.text.strip()
 
-    # 1. Force Join & Verify Button
+    # 2. Force Join Check
     if not await check_force_join(user_id):
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats"))
-        builder.row(InlineKeyboardButton(text="💬 Join Group", url="https://t.me/ffofcchat"))
-        builder.row(InlineKeyboardButton(text="✅ Verify Membership", callback_data="verify"))
+        builder.row(InlineKeyboardButton(text="Join Updates", url="https://t.me/rajxcheats"))
+        builder.row(InlineKeyboardButton(text="Join Group", url="https://t.me/ffofcchat"))
+        builder.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify"))
         
         return await message.reply(
-            "❌ <b>Access Denied!</b>\n\nYou must join our Channel and Group to use this bot.",
+            "⚠️ <b>Join our channels first to use me!</b>",
             reply_markup=builder.as_markup()
         )
 
-    # 2. Loading Animation
+    # 3. Loading UI
     status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<b>ꜱᴇᴀʀᴄʜɪɴɢ ⚡</b>")
-    await asyncio.sleep(0.4)
+    await asyncio.sleep(0.3)
     await status_msg.edit_text("█████████░░░░  68%\n<b>ɢᴇᴛᴛɪɴɢ ʀᴇsᴜʟᴛ ⚡</b>")
     
     start_time = time.perf_counter()
 
     try:
-        # API Call (Fixed Extraction)
         response = scraper.get(f"{PAID_API}&link={link}", timeout=30)
         data = response.json()
-        
-        # Fixing the 'Bypass Error' by checking keys properly
         bypassed_url = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
         
         if not bypassed_url:
-            return await status_msg.edit_text("❌ <b>Bypass Failed!</b>\nLink not supported or API limit reached.")
+            return await status_msg.edit_text("❌ <b>Bypass Error!</b>\nLink not supported.")
 
         time_taken = round(time.perf_counter() - start_time, 2)
 
-        # 3. Final Professional UI (Line Separated)
+        # 4. FINAL CLEAN UI
         ui_text = (
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🏎️ <b>RAJX BYPASS BOT</b> ⚡\n"
@@ -121,25 +122,25 @@ async def handle_bypass(message: types.Message):
         await status_msg.edit_text(ui_text, disable_web_page_preview=True)
 
     except Exception as e:
-        await status_msg.edit_text(f"❌ <b>Error:</b> <code>{str(e)[:100]}</code>")
+        await status_msg.edit_text(f"❌ <b>Error:</b> <code>{str(e)[:50]}</code>")
 
 # ==================== VERIFY CALLBACK ====================
 @dp.callback_query(F.data == "verify")
 async def verify_user(callback: types.CallbackQuery):
     if await check_force_join(callback.from_user.id):
-        await callback.answer("✅ Verified! You can now send links.", show_alert=True)
+        await callback.answer("✅ Verified! Now send the link in Group.", show_alert=True)
         await callback.message.delete()
     else:
-        await callback.answer("❌ You still haven't joined both channels!", show_alert=True)
+        await callback.answer("❌ Join both channels first!", show_alert=True)
 
 # ==================== MAIN START ====================
 async def main():
     Thread(target=run_server, daemon=True).start()
-    print("🚀 Bot Started with @RAJFFLIVE Credit!")
+    print("🚀 Group-Only Bot Started!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        print("Bot Stopped.")
+    except Exception:
+        pass
