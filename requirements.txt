@@ -2,3 +2,5 @@ pyrogram
 tgcrypto
 cloudscraper
 flask
+pymongo
+dnspython
