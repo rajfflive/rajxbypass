@@ -6,23 +6,22 @@ import random
 from flask import Flask
 from threading import Thread
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
 from aiogram.types import InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # ==================== CONFIGURATION (HIDDEN) ====================
-# Yeh saari keys aapko Render/VPS ke Environment Variables mein daalni hain
-TOKEN = os.environ.get("BOT_TOKEN")
-# API key ko 'PAID_API_KEY' naam se environment mein save karein
-API_KEY = os.environ.get("PAID_API_KEY") 
-PAID_API_URL = f"https://detect-shirt-generations-prepaid.trycloudflare.com/bypass?key={API_KEY}&link="
+# Render ke 'Environment Variables' mein ye keys set karein
+TOKEN = os.environ.get("BOT_TOKEN", "7944388044:AAEI_DMgZmczKN4YCdmjlyjSUNJvHRGbvPI")
+API_KEY = os.environ.get("PAID_API_KEY", "ccd271950940c3045784da88a1d3276e")
+MONGO_URL = os.environ.get("MONGO_URL") # MongoDB Atlas Link
 
-MONGO_URL = os.environ.get("MONGO_URL")
-ADMINS = [7944388044, 123456789] # Apni ID yahan list mein add karein
+PAID_API_BASE = f"https://detect-shirt-generations-prepaid.trycloudflare.com/bypass?key={API_KEY}&link="
 
-# Branding
+# Branding & Access
+ADMINS = [7944388044] # Apni numerical ID yahan confirm karein
 CHANNELS = ["ffofcchat", "rajxcheats"] 
 GROUP_LINK = "https://t.me/ffofcchat"
 DEV_HANDLE = "@rajxcheats"
@@ -47,94 +46,112 @@ async def check_force_join(user_id):
     return True
 
 # ==================== ADMIN COMMANDS ====================
-@dp.message(Command("admin"), F.from_user.id.in_(ADMINS))
-async def admin_menu(message: types.Message):
-    menu = (
-        "👑 <b>Admin Control Panel</b>\n\n"
-        "• <code>/broadcast</code> (Reply to msg) - Send to all users\n"
-        "• <code>/stats</code> - Check total users\n"
-        "• <code>/add_admin ID</code> - Add new admin\n"
-        "• <code>/ban ID</code> - Ban a user"
-    )
-    await message.reply(menu)
+@dp.message(Command("stats"), F.from_user.id.in_(ADMINS))
+async def cmd_stats(message: types.Message):
+    count = await users_db.count_documents({})
+    await message.reply(f"📊 <b>Bot Statistics</b>\n\n👤 Total Users: <code>{count}</code>")
 
 @dp.message(Command("broadcast"), F.from_user.id.in_(ADMINS))
-async def broadcast(message: types.Message):
+async def cmd_broadcast(message: types.Message):
     if not message.reply_to_message:
-        return await message.reply("Reply to a message to broadcast!")
+        return await message.reply("❌ Reply to a message to broadcast!")
     
-    users = users_db.find({})
-    count, fail = 0, 0
-    await message.reply("🚀 Broadcast started...")
-    
-    async for user in users:
+    sent = 0
+    msg = await message.reply("📢 <b>Broadcasting...</b>")
+    async for user in users_db.find():
         try:
             await bot.copy_message(user['user_id'], message.chat.id, message.reply_to_message.message_id)
-            count += 1
-            await asyncio.sleep(0.05) # Rate limit check
-        except: fail += 1
-    await message.reply(f"✅ Finished!\nSent: {count}\nFailed: {fail}")
+            sent += 1
+            await asyncio.sleep(0.05)
+        except: pass
+    await msg.edit_text(f"✅ <b>Broadcast Finished!</b>\n\nSent to: <code>{sent}</code> users.")
 
-# ==================== REFER & SPIN SYSTEM ====================
-@dp.message(Command("refer"))
-async def refer(message: types.Message):
-    bot_me = await bot.get_me()
-    ref_link = f"https://t.me/{bot_me.username}?start={message.from_user.id}"
+# ==================== START & FEATURES ====================
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
+    await users_db.update_one(
+        {"user_id": message.from_user.id},
+        {"$set": {"name": message.from_user.first_name, "username": message.from_user.username}},
+        upsert=True
+    )
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats", style="primary"))
+    builder.row(InlineKeyboardButton(text="🚀 USE HERE 🚀", url=GROUP_LINK, style="success"))
+    
     await message.reply(
-        f"🎁 <b>Refer & Earn</b>\n\nInvite 5 friends to get 1 week Ad-Free access!\n\n"
-        f"🔗 Your Link: <code>{ref_link}</code>"
+        f"<blockquote>🏎️ <b>RAJX BYPASS BOT</b>\n━━━━━━━━━━━━━\nHello {message.from_user.first_name}!\n\nAdd me to your group to bypass links instantly.</blockquote>", 
+        reply_markup=builder.as_markup()
     )
 
-@dp.message(Command("spin"))
-async def spin(message: types.Message):
-    # Basic Spin Logic
-    items = ["💎 Premium", "❌ Try Again", "🔥 Double Points", "✨ Lucky Pass"]
-    result = random.choice(items)
-    await message.reply(f"🎰 <b>Daily Spin</b>\n\nResult: <b>{result}</b>")
+@dp.message(Command("refer"))
+async def cmd_refer(message: types.Message):
+    me = await bot.get_me()
+    ref_link = f"https://t.me/{me.username}?start={message.from_user.id}"
+    await message.reply(f"🎁 <b>Refer & Earn</b>\n\nShare this link:\n<code>{ref_link}</code>")
 
-# ==================== BYPASS LOGIC ====================
+@dp.message(Command("spin"))
+async def cmd_spin(message: types.Message):
+    res = random.choice(["🔥 Premium", "❌ Try Again", "✨ Lucky Pass"])
+    await message.reply(f"🎰 <b>Spin Result:</b> {res}")
+
+# ==================== BYPASS HANDLER ====================
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
     if message.chat.type == "private":
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="‼️ USE HERE ‼️", url=GROUP_LINK, style="success"))
-        return await message.reply("<blockquote>❌ <b>Private Bypass Disabled!</b>\nUse our official group.</blockquote>", reply_markup=builder.as_markup())
+        builder.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
+        return await message.reply("<blockquote>❌ <b>Direct Bypass Not Allowed!</b>\n\nNiche button par click karke mere Group mein link send karein.</blockquote>", reply_markup=builder.as_markup())
 
     user_id = message.from_user.id
+    link = message.text.strip()
+
     if not await check_force_join(user_id):
         builder = InlineKeyboardBuilder()
         builder.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats", style="primary"))
         builder.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK, style="danger"))
         builder.row(InlineKeyboardButton(text="🚀 Verify ✅", callback_data="verify", style="success"))
-        return await message.reply("<blockquote>⚠️ <b>Join our channels first!</b></blockquote>", reply_markup=builder.as_markup())
+        return await message.reply("<blockquote>⚠️ <b>Join our channels first to use me!</b></blockquote>", reply_markup=builder.as_markup())
 
-    # --- PROGRESS ANIMATION ---
-    status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Connecting... ⚡</b></blockquote>")
-    await asyncio.sleep(0.4)
-    await status_msg.edit_text("█████████████  100%\n<blockquote><b>Success! ✅</b></blockquote>")
+    # --- DETAILED 10-STAGE PROCESSING ---
+    status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
     
+    stages = [
+        ("█░░░░░░░░░░░░  10%", "<blockquote><b>Connecting to Server... 🛰️</b></blockquote>"),
+        ("██░░░░░░░░░░░  25%", "<blockquote><b>Checking Link Security... 🛡️</b></blockquote>"),
+        ("███░░░░░░░░░░  40%", "<blockquote><b>Bypassing Cloudflare... ⛈️</b></blockquote>"),
+        ("█████░░░░░░░░  55%", "<blockquote><b>Extracting Ad-Data... 🔓</b></blockquote>"),
+        ("███████░░░░░░  70%", "<blockquote><b>Bypassing Shortener... ⚡</b></blockquote>"),
+        ("█████████░░░░  85%", "<blockquote><b>Getting Destination URL... 🔗</b></blockquote>"),
+        ("█████████████  100%", "<blockquote><b>Success! Processing Complete ✅</b></blockquote>")
+    ]
+    
+    for bar, text in stages:
+        await asyncio.sleep(0.5) 
+        try: await status_msg.edit_text(f"{bar}\n{text}")
+        except: pass
+
     start_time = time.perf_counter()
 
     try:
-        response = scraper.get(f"{PAID_API_URL}{message.text.strip()}", timeout=30)
+        response = scraper.get(f"{PAID_API_BASE}{link}", timeout=30)
         data = response.json()
-        
-        # Clean Link Logic (JSON kachra hatane ke liye)
-        res = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
-        bypassed_url = res.get("bypassed") if isinstance(res, dict) else res
 
-        if not bypassed_url:
-            return await status_msg.edit_text("❌ <b>Bypass Failed!</b>\nLink not supported.")
+        raw_res = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
+        bypassed_url = raw_res.get("bypassed") if isinstance(raw_res, dict) else raw_res
+        
+        if not bypassed_url or not str(bypassed_url).startswith("http"):
+            return await status_msg.edit_text("<blockquote>❌ <b>Bypass Failed!</b>\nAPI limit reached or link unsupported.</blockquote>")
 
         time_taken = round(time.perf_counter() - start_time, 2)
-        
+
         ui_text = (
             "<blockquote>"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🏎️ <b>RAJX BYPASS BOT</b> ⚡\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🔗 <b>Original :</b>\n"
-            f"<code>{message.text}</code>\n\n"
+            f"<code>{link}</code>\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🚀 <b>Bypassed :</b>\n"
             f"<b>{bypassed_url}</b>\n\n"
@@ -148,32 +165,22 @@ async def handle_bypass(message: types.Message):
         )
         await status_msg.edit_text(ui_text, disable_web_page_preview=True)
 
-    except:
-        await status_msg.edit_text("❌ <b>Request Timeout!</b>\nAPI busy hai, thodi der mein try karein.")
+    except Exception:
+        await status_msg.edit_text("<blockquote>❌ <b>Request Timeout!</b>\nAPI response slow hai, thodi der mein try karein.</blockquote>")
 
-# ==================== VERIFY & START ====================
+# ==================== CALLBACKS ====================
 @dp.callback_query(F.data == "verify")
-async def verify(callback: types.CallbackQuery):
+async def verify_user(callback: types.CallbackQuery):
     if await check_force_join(callback.from_user.id):
         await callback.answer("✅ Verified!", show_alert=True)
         await callback.message.delete()
     else:
-        await callback.answer("❌ Join both channels first!", show_alert=True)
+        await callback.answer("❌ Join Dono Channels Pehle!", show_alert=True)
 
-@dp.message(Command("start"))
-async def start(message: types.Message):
-    # Save User to DB
-    await users_db.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="📢 Channel", url="https://t.me/rajxcheats", style="primary"))
-    builder.row(InlineKeyboardButton(text="🚀 USE HERE 🚀", url=GROUP_LINK, style="success"))
-    await message.reply(f"<blockquote>🏎️ <b>RAJX BYPASS BOT</b>\n━━━━━━━━━━━━━\nAdd me to group to bypass!</blockquote>", reply_markup=builder.as_markup())
-
-# ==================== RUN SERVER & BOT ====================
+# ==================== RENDER WEB SERVER ====================
 server = Flask(__name__)
 @server.route('/')
-def st(): return "✅ Bot is Live"
+def status_page(): return "✅ Rajx Pro is Live"
 
 def run_server():
     port = int(os.environ.get("PORT", 10000))
