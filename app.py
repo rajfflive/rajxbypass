@@ -12,7 +12,6 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import InlineKeyboardButton
 
 # ==================== CONFIGURATION ====================
-# TOKEN yahan se replace karein agar environment variable use nahi kar rahe
 TOKEN = os.environ.get("BOT_TOKEN", "7944388044:AAEI_DMgZmczKN4YCdmjlyjSUNJvHRGbvPI")
 PAID_API = "https://detect-shirt-generations-prepaid.trycloudflare.com/bypass?key=ccd271950940c3045784da88a1d3276e"
 
@@ -49,7 +48,8 @@ async def handle_bypass(message: types.Message):
     # Personal Chat Redirect (Group Only Mode)
     if message.chat.type == "private":
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="🟢 USE HERE 🟢", url=GROUP_LINK))
+        # Green Color Button
+        builder.row(InlineKeyboardButton(text="‼️ USE HERE ‼️", url=GROUP_LINK, style="success"))
         return await message.reply(
             "<blockquote>❌ <b>Direct Bypass Not Allowed!</b>\n\nNiche diye gaye button par click karke mere Group mein link send karein.</blockquote>",
             reply_markup=builder.as_markup()
@@ -61,12 +61,13 @@ async def handle_bypass(message: types.Message):
     # Force Join Check
     if not await check_force_join(user_id):
         builder = InlineKeyboardBuilder()
-        builder.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats"))
-        builder.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK))
-        builder.row(InlineKeyboardButton(text="🔵 Verify ✅", callback_data="verify"))
+        # Blue Color for Channel, Red for Group, Green for Verify
+        builder.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats", style="primary"))
+        builder.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK, style="danger"))
+        builder.row(InlineKeyboardButton(text="🚀 Verify ✅", callback_data="verify", style="success"))
         return await message.reply("<blockquote>⚠️ <b>Join our channels first to use me!</b></blockquote>", reply_markup=builder.as_markup())
 
-    # --- PROGRESS ANIMATION (More Detailed) ---
+    # --- PROGRESS ANIMATION ---
     status_msg = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Connecting... ⚡</b></blockquote>")
     
     stages = [
@@ -83,16 +84,12 @@ async def handle_bypass(message: types.Message):
     start_time = time.perf_counter()
 
     try:
-        # API CALL WITH 30s TIMEOUT
         response = scraper.get(f"{PAID_API}&link={link}", timeout=30)
         data = response.json()
 
-        # Clean Link Extraction (Loda Lassun Fix)
         bypassed_url = None
         if isinstance(data, dict):
-            # Checking all possible keys for the link
             raw_res = data.get("bypassed") or data.get("bypassed_url") or data.get("result")
-            # Handle nested dictionary if any
             bypassed_url = raw_res.get("bypassed") if isinstance(raw_res, dict) else raw_res
         
         if not bypassed_url or not str(bypassed_url).startswith("http"):
@@ -100,7 +97,6 @@ async def handle_bypass(message: types.Message):
 
         time_taken = round(time.perf_counter() - start_time, 2)
 
-        # --- FINAL PREMIUM UI ---
         ui_text = (
             "<blockquote>"
             "━━━━━━━━━━━━━━━━━━━━\n"
@@ -137,8 +133,9 @@ async def verify_user(callback: types.CallbackQuery):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="📢 Channel", url="https://t.me/rajxcheats"))
-    builder.row(InlineKeyboardButton(text="🟢 USE HERE 🟢", url=GROUP_LINK))
+    # Blue and Green Colors
+    builder.row(InlineKeyboardButton(text="📢 Channel", url="https://t.me/rajxcheats", style="primary"))
+    builder.row(InlineKeyboardButton(text="🚀 USE HERE 🚀", url=GROUP_LINK, style="success"))
     
     await message.reply(
         f"<blockquote>🏎️ <b>RAJX BYPASS BOT</b>\n━━━━━━━━━━━━━\nHello! I'm the fastest link bypasser. Add me to your group to use me!</blockquote>", 
