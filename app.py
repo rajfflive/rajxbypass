@@ -23,13 +23,12 @@ GROUP_LINK = "https://t.me/ffofcchat"
 BUY_API_LINK = "https://t.me/visitpornhub"
 WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
 
-# ==================== BOT SETUP ====================
+# ==================== DATABASE & BOT SETUP ====================
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 scraper = cloudscraper.create_scraper()
 
-users_col = None
-groups_col = None
+users_col, groups_col = None, None
 
 async def init_db():
     global users_col, groups_col
@@ -37,8 +36,7 @@ async def init_db():
         try:
             client = AsyncIOMotorClient(MONGO_URL)
             db = client.bypass_bot
-            users_col = db.users
-            groups_col = db.groups
+            users_col, groups_col = db.users, db.groups
             print("✅ Database Connected")
         except: print("⚠️ DB Error")
 
@@ -70,7 +68,7 @@ async def cmd_broadcast(message: types.Message):
     targets = list(set([u['user_id'] for u in users] + [g['group_id'] for g in groups]))
     
     ok, fail = 0, 0
-    msg = await message.reply(f"🚀 <b>Broadcasting to {len(targets)} targets...</b>")
+    msg = await message.reply(f"🚀 <b>Broadcasting to {len(targets)}...</b>")
     for t_id in targets:
         try:
             await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
@@ -90,21 +88,13 @@ async def start(message: types.Message):
     b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
     b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
     
-    caption = (
-        "<blockquote>"
-        f"🏎️ <b>RAJX BYPASS SYSTEM</b>\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Welcome <b>{message.from_user.first_name}</b>!\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Send any link to bypass or join our community.\n\n"
-        "━━━━━━━━━━━━━━━━━━━━"
-        "</blockquote>"
-    )
+    caption = (f"<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+               f"Welcome <b>{message.from_user.first_name}</b>!\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+               "Send any link to bypass.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>")
     await message.answer_photo(photo=WELCOME_PIC, caption=caption, reply_markup=b.as_markup())
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    # Auto-save Group ID
     if message.chat.type in ["group", "supergroup"] and groups_col:
         await groups_col.update_one({"group_id": message.chat.id}, {"$set": {"title": message.chat.title}}, upsert=True)
 
@@ -113,21 +103,16 @@ async def handle_bypass(message: types.Message):
         b.row(InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_1_LINK, style="primary"))
         b.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK, style="primary"))
         b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
-        return await message.reply("<blockquote>❗ <b>ACCESS DENIED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nYou must join our channels to use this bot.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
+        return await message.reply("<blockquote>❗ <b>ACCESS DENIED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nYou must join our channels.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
 
     # --- 10 STAGES ANIMATION ---
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
     stages = [
-        ("█░░░░░░░░░░░  10%", "<b>Connecting Proxy... 🛰️</b>"),
-        ("██░░░░░░░░░░  20%", "<b>Bypassing Ads... ⛈️</b>"),
-        ("███░░░░░░░░░  30%", "<b>Checking Safety... 🛡️</b>"),
-        ("████░░░░░░░░  40%", "<b>Solving Captcha... 🤖</b>"),
-        ("██████░░░░░░  55%", "<b>Extracting Data... 🔓</b>"),
-        ("███████░░░░░  65%", "<b>Bypassing Links... ⚡</b>"),
-        ("█████████░░░  80%", "<b>Decrypting URL... 🔑</b>"),
-        ("██████████░░  90%", "<b>Finalizing Result... ✨</b>"),
-        ("████████████  98%", "<b>Generating Response... 📝</b>"),
-        ("████████████  100%", "<b>Success! ✅</b>")
+        ("█░░░░░░░░░░░  10%", "Connecting Proxy..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
+        ("███░░░░░░░░░  30%", "Checking Safety..."), ("████░░░░░░░░  40%", "Solving Captcha..."),
+        ("█████░░░░░░░  50%", "Extracting Data..."), ("██████░░░░░░  60%", "Bypassing Links..."),
+        ("████████░░░░  75%", "Decrypting URL..."), ("██████████░░  85%", "Finalizing Result..."),
+        ("████████████  95%", "Generating Link..."), ("████████████  100%", "Success! ✅")
     ]
 
     for bar, text in stages:
@@ -136,15 +121,20 @@ async def handle_bypass(message: types.Message):
         except: pass
 
     try:
-        r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
+        # API CALL FIX
+        full_url = f"{API_URL}{message.text.strip()}"
+        r = scraper.get(full_url, timeout=30).json()
+        
+        # Indian Time Fix
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
         
-        link = r.get("bypassed") or r.get("url") or r.get("result")
-        if isinstance(link, dict): link = link.get("url")
+        # Link extraction from multiple possible keys
+        link = r.get("bypassed") or r.get("url") or r.get("result") or r.get("link")
+        if isinstance(link, dict): link = link.get("url") or link.get("bypassed")
 
         if not link or str(link).lower() == "none":
-            return await status.edit_text("<blockquote>❌ <b>LINK NOT FOUND!</b></blockquote>")
+            return await status.edit_text("<blockquote>❌ <b>BYPASS FAILED!</b>\n\nAPI did not return a valid link.</blockquote>")
 
         res_text = (
             "<blockquote>"
@@ -164,7 +154,7 @@ async def handle_bypass(message: types.Message):
         )
         await status.edit_text(res_text, disable_web_page_preview=True)
     except:
-        await status.edit_text("❌ API Error!")
+        await status.edit_text("<blockquote>❌ <b>API ERROR!</b>\n\nInvalid Link or Server Down.</blockquote>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
