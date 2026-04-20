@@ -21,7 +21,7 @@ CHANNELS = ["-1003898508261", "ffofcchat"]
 CHANNEL_1_LINK = "https://t.me/+HpoHOHMq0VpiYWVl" 
 GROUP_LINK = "https://t.me/ffofcchat"
 BUY_API_LINK = "https://t.me/visitpornhub"
-WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
+WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg" # अपनी फोटो लिंक यहाँ डालें
 
 # ==================== DATABASE & BOT SETUP ====================
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
@@ -84,12 +84,10 @@ async def start(message: types.Message):
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    # Private Block
     if message.chat.type == "private" and message.from_user.id != OWNER_ID:
         b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
         return await message.reply("<blockquote>❌ <b>PRIVATE BYPASS DISABLED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nPlease send your links in our official group only.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
 
-    # Force Join
     if not await check_fj(message.from_user.id):
         b = InlineKeyboardBuilder()
         b.row(InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_1_LINK, style="primary"))
@@ -111,12 +109,15 @@ async def handle_bypass(message: types.Message):
         except: pass
 
     try:
+        # API रिस्पॉन्स लेना
         r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
         
-        # Data Extraction
+        # --- 🛡️ JSON EXTRACTION FIX ---
         if isinstance(r, dict):
-            link = r.get("bypassed") or r.get("url") or r.get("result")
-            time_taken = r.get("time_taken", "N/A")
+            # ब्रैकेट से सिर्फ साफ़ लिंक निकालना
+            link = r.get("bypassed") or r.get("url") or r.get("result") or r.get("link")
+            # टाइम निकालना
+            time_taken = r.get("time_taken") or r.get("time") or "N/A"
         else:
             link = r
             time_taken = "N/A"
@@ -127,7 +128,7 @@ async def handle_bypass(message: types.Message):
         if not link or str(link).lower() == "none":
              return await status.edit_text("<blockquote>❌ <b>API Error: Link Not Found!</b></blockquote>")
 
-        # Clean Format: Original -> Divider -> Bypass -> Time Taken
+        # --- 🏎️ CLEAN RESPONSE LAYOUT ---
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
