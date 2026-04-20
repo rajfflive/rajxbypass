@@ -79,7 +79,7 @@ async def handle_bypass(message: types.Message):
     # Force Join Check
     if not await check_fj(message.from_user.id):
         b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me"), InlineKeyboardButton(text="💬 Join Group", url="https://t.me"))
+        b.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats"), InlineKeyboardButton(text="💬 Join Group", url="https://t.me/ffofcchat"))
         b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
         return await message.reply("<blockquote>❗ <b>ACCESS DENIED!</b>\n\nYou must join our channels to use this bot.</blockquote>", reply_markup=b.as_markup())
 
