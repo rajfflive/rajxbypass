@@ -1,4 +1,4 @@
-import os, asyncio, cloudscraper, datetime, pytz, ast
+import os, asyncio, cloudscraper, datetime, pytz, json
 from flask import Flask
 from threading import Thread
 from aiogram import Bot, Dispatcher, types, F
@@ -84,13 +84,22 @@ async def start(message: types.Message):
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    if message.chat.type == "private" and message.from_user.id != OWNER_ID:
-        return await message.reply("❌ <b>PRIVATE BYPASS DISABLED!</b>")
-
-    if not await check_fj(message.from_user.id):
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
+    # Force Join Check
+    is_verified = await check_fj(message.from_user.id)
+    
+    if not is_verified:
+        b = InlineKeyboardBuilder()
+        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
+        b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
         return await message.reply("❗ <b>ACCESS DENIED! Join our channel.</b>", reply_markup=b.as_markup())
 
+    # Private Bypass Control
+    if message.chat.type == "private" and message.from_user.id != OWNER_ID:
+        # Agar aap chahte ho ki verified hone ke baad bhi private chat me na chale:
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
+        return await message.reply("❌ <b>PRIVATE BYPASS DISABLED!</b>\n\nUse our official group to bypass links.", reply_markup=b.as_markup())
+
+    # --- 🏎️ 10 STAGES PROCESSING ---
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
     stages = [
         ("█░░░░░░░░░░░  10%", "Connecting..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
@@ -105,11 +114,11 @@ async def handle_bypass(message: types.Message):
         except: pass
 
     try:
-        # API Response parsing fix
+        # API Response Fix
         response = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30)
-        data = response.json() # Direct JSON parse
+        data = response.json()
         
-        # Extracting from nested 'result' key
+        # Extract from 'result' nested key
         res_inner = data.get("result", {})
         link = res_inner.get("bypassed", "Error")
         time_val = res_inner.get("time_taken", "N/A")
@@ -133,8 +142,8 @@ async def handle_bypass(message: types.Message):
         
         b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
-    except:
-        await status.edit_text("❌ <b>API ERROR!</b>")
+    except Exception as e:
+        await status.edit_text(f"❌ <b>API ERROR!</b>\n<code>{str(e)}</code>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
