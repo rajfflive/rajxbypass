@@ -74,26 +74,23 @@ async def cmd_broadcast(message: types.Message):
 async def start(message: types.Message):
     if users_col: await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
-    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
+    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
+    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
     await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome! Send link to bypass.</blockquote>", reply_markup=b.as_markup())
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    # 1. Private Restriction (Block Links in PM)
     if message.chat.type == "private" and message.from_user.id != OWNER_ID:
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
         return await message.reply("<blockquote>❌ <b>PRIVATE BYPASS DISABLED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nPlease send your links in our official group only.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
 
-    # 2. Force Join Check
     if not await check_fj(message.from_user.id):
         b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_1_LINK, style="primary"))
-        b.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK, style="primary"))
-        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
+        b.row(InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_1_LINK))
+        b.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK))
+        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify"))
         return await message.reply("<blockquote>❗ <b>ACCESS DENIED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nYou must join our channels to use this bot.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
 
-    # 3. 10 STAGES ANIMATION
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
     stages = [
         ("█░░░░░░░░░░░  10%", "Connecting..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
@@ -103,35 +100,41 @@ async def handle_bypass(message: types.Message):
         ("████████████  95%", "Generating Link..."), ("████████████  100%", "Success! ✅")
     ]
     for bar, text in stages:
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.1)
         try: await status.edit_text(f"{bar}\n<blockquote>{text}</blockquote>")
         except: pass
 
-    # 4. API Logic & Detailed Response
     try:
-        r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
+        # Fetching from API
+        response = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
+        
+        # --- FIX: Properly extracting the string from JSON ---
+        if isinstance(response, dict):
+            link = response.get("bypassed") or response.get("url") or response.get("result")
+        else:
+            link = response
+
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
-        link = r.get("bypassed") or r.get("url") or r.get("result") or r.get("link")
         
         if not link or str(link).lower() == "none":
              return await status.edit_text("<blockquote>❌ <b>API Error: Link Not Found!</b></blockquote>")
 
+        # --- FIX: Formatting as Original [Space] Bypassed ---
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👤 <b>User:</b> {message.from_user.first_name}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔗 <b>Original:</b>\n<code>{message.text[:35]}...</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🚀 <b>Bypassed Link:</b>\n<b>{link}</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔗 <b>Links:</b>\n<code>{message.text.strip()}</code> {link}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"🕒 <b>Time:</b> <code>{time_now}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👑 <b>Owner:</b> {DEV_HANDLE}\n\n━━━━━━━━━━━━━━━━━━━━"
             "</blockquote>"
         )
-        # रिस्पॉन्स के नीचे BUY API बटन
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
+        
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
-    except:
-        await status.edit_text("❌ <b>API ERROR!</b>")
+    except Exception as e:
+        await status.edit_text(f"❌ <b>API ERROR!</b>\n<code>{e}</code>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
