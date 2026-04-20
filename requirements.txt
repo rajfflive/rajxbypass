@@ -2,5 +2,4 @@ aiogram
 cloudscraper
 flask
 motor
-dnspython
-pymongo
+pytz
