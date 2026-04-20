@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, ReactionTypeEmoji
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # ==================== 🛠️ CONFIGURATION ====================
@@ -18,7 +18,7 @@ DEV_HANDLE = "@rajfflive"
 
 # --- 📢 LINKS ---
 CHANNELS = ["-1003898508261", "ffofcchat"] 
-CHANNEL_1_LINK = "https://t.me/+HpoHOHMq0VpiYWVl" 
+CHANNEL_LINK = "https://t.me/+HpoHOHMq0VpiYWVl" 
 GROUP_LINK = "https://t.me/ffofcchat"
 BUY_API_LINK = "https://t.me/visitpornhub"
 WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
@@ -69,7 +69,7 @@ async def cmd_broadcast(message: types.Message):
             await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
             sent += 1
         except: pass
-    await message.reply(f"📢 <b>Broadcast Done!</b> Sent to {sent} users/groups.")
+    await message.reply(f"📢 <b>Broadcast Done!</b> Sent to {sent} targets.")
 
 # ==================== 🏎️ MAIN LOGIC ====================
 
@@ -79,27 +79,28 @@ async def start(message: types.Message):
         await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
-    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
+    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
     await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome! Send link to bypass.</blockquote>", reply_markup=b.as_markup())
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    # Force Join Check
+    try: await message.react([ReactionTypeEmoji(emoji="👀")])
+    except: pass
+
     is_verified = await check_fj(message.from_user.id)
     
     if not is_verified:
         b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
-        b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
-        return await message.reply("❗ <b>ACCESS DENIED! Join our channel.</b>", reply_markup=b.as_markup())
+        b.row(InlineKeyboardButton(text="Join Channel 📢", url=CHANNEL_LINK, style="primary"))
+        b.row(InlineKeyboardButton(text="Join Group 💬", url=GROUP_LINK, style="primary"))
+        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success")) # Green
+        b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
+        return await message.reply("❗ <b>ACCESS DENIED! Join BOTH our channel and group.</b>", reply_markup=b.as_markup())
 
-    # Private Bypass Control
     if message.chat.type == "private" and message.from_user.id != OWNER_ID:
-        # Agar aap chahte ho ki verified hone ke baad bhi private chat me na chale:
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
-        return await message.reply("❌ <b>PRIVATE BYPASS DISABLED!</b>\n\nUse our official group to bypass links.", reply_markup=b.as_markup())
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
+        return await message.reply("❌ <b>PRIVATE BYPASS DISABLED!</b>\n\nUse our official group.", reply_markup=b.as_markup())
 
-    # --- 🏎️ 10 STAGES PROCESSING ---
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
     stages = [
         ("█░░░░░░░░░░░  10%", "Connecting..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
@@ -114,19 +115,20 @@ async def handle_bypass(message: types.Message):
         except: pass
 
     try:
-        # API Response Fix
-        response = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30)
-        data = response.json()
+        response = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
+        res_data = response.get("result", {})
         
-        # Extract from 'result' nested key
-        res_inner = data.get("result", {})
-        link = res_inner.get("bypassed", "Error")
-        time_val = res_inner.get("time_taken", "N/A")
-        usage_val = res_inner.get("usage_count", "N/A")
+        link = res_data.get("bypassed", "Error")
+        time_val = res_data.get("time_taken", "N/A")
+        usage_val = res_data.get("usage_count", "N/A")
+
+        try: await message.react([ReactionTypeEmoji(emoji="💯")])
+        except: pass
 
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
 
+        # --- 🏎️ FULL ORIGINAL RESPONSE TEXT ---
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -142,15 +144,15 @@ async def handle_bypass(message: types.Message):
         
         b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
-    except Exception as e:
-        await status.edit_text(f"❌ <b>API ERROR!</b>\n<code>{str(e)}</code>")
+    except:
+        await status.edit_text("❌ <b>API ERROR!</b>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
     if await check_fj(cb.from_user.id):
         await cb.answer("✅ Verified!", show_alert=True)
         await cb.message.delete()
-    else: await cb.answer("❌ Join channels first!", show_alert=True)
+    else: await cb.answer("❌ Join BOTH channel and group first!", show_alert=True)
 
 # ==================== RUNNER ====================
 server = Flask(__name__)
@@ -161,7 +163,6 @@ async def main():
     await init_db()
     await bot.delete_webhook(drop_pending_updates=True)
     Thread(target=lambda: server.run(host="0.0.0.0", port=10000), daemon=True).start()
-    print("🤖 Bot Ready")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
