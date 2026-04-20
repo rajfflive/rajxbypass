@@ -16,7 +16,7 @@ MONGO_URL = os.environ.get("MONGO_URL")
 OWNER_ID = 8154922225 
 DEV_HANDLE = "@rajfflive"
 
-# --- 📢 LINKS & CHANNELS ---
+# --- 📢 LINKS ---
 CHANNELS = ["-1003898508261", "ffofcchat"] 
 CHANNEL_1_LINK = "https://t.me/+HpoHOHMq0VpiYWVl" 
 GROUP_LINK = "https://t.me/ffofcchat"
@@ -27,7 +27,6 @@ WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 scraper = cloudscraper.create_scraper()
-
 users_col, groups_col = None, None
 
 async def init_db():
@@ -54,107 +53,85 @@ async def check_fj(u_id):
 
 @dp.message(Command("stats"), F.from_user.id == OWNER_ID)
 async def cmd_stats(message: types.Message):
-    u_count = await users_col.count_documents({}) if users_col else 0
-    g_count = await groups_col.count_documents({}) if groups_col else 0
-    await message.reply(f"📊 <b>BOT STATISTICS</b>\n\n👤 <b>Users:</b> {u_count}\n👥 <b>Groups:</b> {g_count}")
+    u = await users_col.count_documents({}) if users_col else 0
+    g = await groups_col.count_documents({}) if groups_col else 0
+    await message.reply(f"📊 <b>Stats:</b> Users: {u} | Groups: {g}")
 
 @dp.message(Command("broadcast"), F.from_user.id == OWNER_ID)
 async def cmd_broadcast(message: types.Message):
-    if not message.reply_to_message:
-        return await message.reply("❌ Reply to a message to broadcast!")
-    
+    if not message.reply_to_message: return await message.reply("❌ Reply to a message!")
     users = await users_col.find().to_list(None) if users_col else []
     groups = await groups_col.find().to_list(None) if groups_col else []
     targets = list(set([u['user_id'] for u in users] + [g['group_id'] for g in groups]))
-    
-    ok, fail = 0, 0
-    msg = await message.reply(f"🚀 <b>Broadcasting to {len(targets)}...</b>")
     for t_id in targets:
-        try:
-            await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
-            ok += 1
-            await asyncio.sleep(0.05)
-        except: fail += 1
-    await msg.edit_text(f"📢 <b>Broadcast Done!</b>\n\n✅ Success: {ok}\n❌ Failed: {fail}")
+        try: await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
+        except: pass
+    await message.reply("📢 Broadcast Done!")
 
-# ==================== 🏎️ BYPASS LOGIC ====================
+# ==================== 🏎️ MAIN LOGIC ====================
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    if users_col:
-        await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
-    
+    if users_col: await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
     b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
-    
-    caption = (f"<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-               f"Welcome <b>{message.from_user.first_name}</b>!\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-               "Send any link to bypass.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>")
-    await message.answer_photo(photo=WELCOME_PIC, caption=caption, reply_markup=b.as_markup())
+    await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome! Send link to bypass.</blockquote>", reply_markup=b.as_markup())
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    if message.chat.type in ["group", "supergroup"] and groups_col:
-        await groups_col.update_one({"group_id": message.chat.id}, {"$set": {"title": message.chat.title}}, upsert=True)
+    # 1. Private Restriction (Block Links in PM)
+    if message.chat.type == "private" and message.from_user.id != OWNER_ID:
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
+        return await message.reply("<blockquote>❌ <b>PRIVATE BYPASS DISABLED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nPlease send your links in our official group only.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
 
+    # 2. Force Join Check
     if not await check_fj(message.from_user.id):
         b = InlineKeyboardBuilder()
         b.row(InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_1_LINK, style="primary"))
         b.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK, style="primary"))
         b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
-        return await message.reply("<blockquote>❗ <b>ACCESS DENIED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nYou must join our channels.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
+        return await message.reply("<blockquote>❗ <b>ACCESS DENIED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nYou must join our channels to use this bot.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
 
-    # --- 10 STAGES ANIMATION ---
+    # 3. 10 STAGES ANIMATION
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
     stages = [
-        ("█░░░░░░░░░░░  10%", "Connecting Proxy..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
-        ("███░░░░░░░░░  30%", "Checking Safety..."), ("████░░░░░░░░  40%", "Solving Captcha..."),
+        ("█░░░░░░░░░░░  10%", "Connecting..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
+        ("███░░░░░░░░░  30%", "Safety Check..."), ("████░░░░░░░░  40%", "Solving Captcha..."),
         ("█████░░░░░░░  50%", "Extracting Data..."), ("██████░░░░░░  60%", "Bypassing Links..."),
         ("████████░░░░  75%", "Decrypting URL..."), ("██████████░░  85%", "Finalizing Result..."),
         ("████████████  95%", "Generating Link..."), ("████████████  100%", "Success! ✅")
     ]
-
     for bar, text in stages:
         await asyncio.sleep(0.15)
         try: await status.edit_text(f"{bar}\n<blockquote>{text}</blockquote>")
         except: pass
 
+    # 4. API Logic & Detailed Response
     try:
-        # API CALL FIX
-        full_url = f"{API_URL}{message.text.strip()}"
-        r = scraper.get(full_url, timeout=30).json()
-        
-        # Indian Time Fix
+        r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
-        
-        # Link extraction from multiple possible keys
         link = r.get("bypassed") or r.get("url") or r.get("result") or r.get("link")
-        if isinstance(link, dict): link = link.get("url") or link.get("bypassed")
-
+        
         if not link or str(link).lower() == "none":
-            return await status.edit_text("<blockquote>❌ <b>BYPASS FAILED!</b>\n\nAPI did not return a valid link.</blockquote>")
+             return await status.edit_text("<blockquote>❌ <b>API Error: Link Not Found!</b></blockquote>")
 
         res_text = (
             "<blockquote>"
-            "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👤 <b>User:</b> {message.from_user.first_name}\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔗 <b>Original Link:</b>\n<code>{message.text[:35]}...</code>\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🚀 <b>Bypassed Link:</b>\n<b>{link}</b>\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🕒 <b>Time:</b> <code>{time_now}</code>\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👑 <b>Owner:</b> {DEV_HANDLE}\n\n"
-            "━━━━━━━━━━━━━━━━━━━━"
+            "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>User:</b> {message.from_user.first_name}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔗 <b>Original:</b>\n<code>{message.text[:35]}...</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🚀 <b>Bypassed Link:</b>\n<b>{link}</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🕒 <b>Time:</b> <code>{time_now}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👑 <b>Owner:</b> {DEV_HANDLE}\n\n━━━━━━━━━━━━━━━━━━━━"
             "</blockquote>"
         )
-        await status.edit_text(res_text, disable_web_page_preview=True)
+        # रिस्पॉन्स के नीचे BUY API बटन
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
+        await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
     except:
-        await status.edit_text("<blockquote>❌ <b>API ERROR!</b>\n\nInvalid Link or Server Down.</blockquote>")
+        await status.edit_text("❌ <b>API ERROR!</b>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
