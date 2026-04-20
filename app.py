@@ -63,33 +63,38 @@ async def cmd_broadcast(message: types.Message):
     users = await users_col.find().to_list(None) if users_col else []
     groups = await groups_col.find().to_list(None) if groups_col else []
     targets = list(set([u['user_id'] for u in users] + [g['group_id'] for g in groups]))
+    sent = 0
     for t_id in targets:
-        try: await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
+        try: 
+            await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
+            sent += 1
         except: pass
-    await message.reply("📢 Broadcast Done!")
+    await message.reply(f"📢 <b>Broadcast Done!</b> Sent to {sent} targets.")
 
 # ==================== 🏎️ MAIN LOGIC ====================
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    if users_col: await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
+    if users_col: 
+        await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
     b = InlineKeyboardBuilder()
-    # Note: Telegram doesn't support 'style' for URL buttons, but I've kept the structure you like.
-    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
-    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
+    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
+    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
     await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome! Send link to bypass.</blockquote>", reply_markup=b.as_markup())
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
+    # Private Block
     if message.chat.type == "private" and message.from_user.id != OWNER_ID:
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
         return await message.reply("<blockquote>❌ <b>PRIVATE BYPASS DISABLED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nPlease send your links in our official group only.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
 
+    # Force Join
     if not await check_fj(message.from_user.id):
         b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_1_LINK))
-        b.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK))
-        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify"))
+        b.row(InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_1_LINK, style="primary"))
+        b.row(InlineKeyboardButton(text="💬 Join Group", url=GROUP_LINK, style="primary"))
+        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
         return await message.reply("<blockquote>❗ <b>ACCESS DENIED!</b>\n\n━━━━━━━━━━━━━━━━━━━━\n\nYou must join our channels to use this bot.\n\n━━━━━━━━━━━━━━━━━━━━</blockquote>", reply_markup=b.as_markup())
 
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
@@ -108,11 +113,13 @@ async def handle_bypass(message: types.Message):
     try:
         r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
         
-        # Cleanly extract only the link string
+        # Data Extraction
         if isinstance(r, dict):
             link = r.get("bypassed") or r.get("url") or r.get("result")
+            time_taken = r.get("time_taken", "N/A")
         else:
             link = r
+            time_taken = "N/A"
 
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
@@ -120,23 +127,26 @@ async def handle_bypass(message: types.Message):
         if not link or str(link).lower() == "none":
              return await status.edit_text("<blockquote>❌ <b>API Error: Link Not Found!</b></blockquote>")
 
-        # Response with: Original [Space] Bypassed Link
+        # Clean Format: Original -> Divider -> Bypass -> Time Taken
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👤 <b>User:</b> {message.from_user.first_name}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔗 <b>Links:</b>\n"
-            f"<code>{message.text.strip()}</code> {link}\n\n"
+            f"🔗 <b>Original:</b>\n<code>{message.text.strip()}</code>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🚀 <b>Bypassed Link:</b>\n{link}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"⚡ <b>Time Taken:</b> <code>{time_taken}</code>\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             f"🕒 <b>Time:</b> <code>{time_now}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👑 <b>Owner:</b> {DEV_HANDLE}\n\n━━━━━━━━━━━━━━━━━━━━"
             "</blockquote>"
         )
         
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
-    except Exception as e:
-        await status.edit_text(f"❌ <b>API ERROR!</b>\n<code>{e}</code>")
+    except:
+        await status.edit_text("❌ <b>API ERROR!</b>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
