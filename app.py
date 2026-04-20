@@ -1,6 +1,4 @@
-import os
-import asyncio
-import cloudscraper
+import os, asyncio, cloudscraper
 from flask import Flask
 from threading import Thread
 from aiogram import Bot, Dispatcher, types, F
@@ -26,155 +24,119 @@ bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 scraper = cloudscraper.create_scraper()
 
-# --- Database ---
 users_col = None
 groups_col = None
 
 async def init_db():
     global users_col, groups_col
-    if MONGO_URL:
-        try:
-            client = AsyncIOMotorClient(MONGO_URL)
-            db = client.bypass_bot
-            users_col = db.users
-            groups_col = db.groups
-            print("✅ Database Connected")
-        except: print("⚠️ DB Error")
+    try:
+        client = AsyncIOMotorClient(MONGO_URL)
+        db = client.bypass_bot
+        users_col = db.users
+        groups_col = db.groups
+        print("✅ MongoDB Connected")
+    except Exception as e:
+        print(f"❌ DB Error: {e}")
 
-# ==================== OWNER GOD FUNCTIONS ====================
-
-def is_owner(u_id): return u_id == OWNER_ID
-
-@dp.message(Command("stats"), F.from_user.id == OWNER_ID)
-async def cmd_stats(message: types.Message):
-    u_count = await users_col.count_documents({}) if users_col else 0
-    g_count = await groups_col.count_documents({}) if groups_col else 0
-    pipeline = [{"$group": {"_id": None, "total": {"$sum": "$bypasses"}}}]
-    res = await users_col.aggregate(pipeline).to_list(1)
-    total_b = res[0]['total'] if res else 0
-
-    stats_text = (
-        "📈 <b>ULTIMATE BOT STATS</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Total Users:</b> <code>{u_count}</code>\n"
-        f"👥 <b>Total Groups:</b> <code>{g_count}</code>\n"
-        f"🏎️ <b>Total Bypasses:</b> <code>{total_b}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━"
-    )
-    await message.reply(stats_text)
-
-@dp.message(Command("broadcast"), F.from_user.id == OWNER_ID)
-async def cmd_broadcast(message: types.Message):
-    if not message.reply_to_message:
-        return await message.reply("❌ Reply to a message to broadcast!")
-    
-    users = await users_col.find().to_list(10000)
-    groups = await groups_col.find().to_list(10000)
-    targets = list(set([u['user_id'] for u in users] + [g['group_id'] for g in groups]))
-    
-    ok, fail = 0, 0
-    for t_id in targets:
-        try:
-            await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
-            ok += 1
-            await asyncio.sleep(0.05)
-        except: fail += 1
-    await message.reply(f"📢 <b>Broadcast Done!</b>\n✅ Success: {ok}\n❌ Failed: {fail}")
-
-# ==================== BYPASS HANDLER (8 STAGES) ====================
+# ==================== HELPERS ====================
 
 async def check_fj(u_id):
-    if is_owner(u_id): return True
+    if u_id == OWNER_ID: return True
     for c in CHANNELS:
         try:
             m = await bot.get_chat_member(f"@{c}", u_id)
             if m.status in ["left", "kicked"]: return False
-        except: return False
+        except: return True # Admin nhi hai tab bhi bypass allow karega error se bachne ke liye
     return True
 
-@dp.message(F.text.startswith("http"))
-async def handle_bypass(message: types.Message):
-    # Track Group
-    if message.chat.type in ["group", "supergroup"]:
-        await groups_col.update_one({"group_id": message.chat.id}, {"$set": {"title": message.chat.title}}, upsert=True)
-
-    if not await check_fj(message.from_user.id):
-        b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats"), InlineKeyboardButton(text="💬 Join Group", url="https://t.me/ffofcchat"))
-        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
-        return await message.reply("<blockquote>❗ <b>Join Channels First!</b></blockquote>", reply_markup=b.as_markup())
-
-    if message.chat.type == "private" and not is_owner(message.from_user.id):
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
-        return await message.reply("<blockquote>❌ <b>PRIVATE BYPASS OFF!</b>\n\nLink group mein bhejein.</blockquote>", reply_markup=b.as_markup())
-
-    # --- 8 STAGES PROCESSING ---
-    status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing Engine... ⚙️</b></blockquote>")
-    stages = [
-        ("█░░░░░░░░░░░  12%", "<b>Connecting Proxy... 🛰️</b>"),
-        ("██░░░░░░░░░░  25%", "<b>Bypassing Ads... ⛈️</b>"),
-        ("████░░░░░░░░  40%", "<b>Checking Safety... 🛡️</b>"),
-        ("██████░░░░░░  55%", "<b>Solving Captcha... 🤖</b>"),
-        ("████████░░░░  70%", "<b>Extracting Link... 🔓</b>"),
-        ("██████████░░  85%", "<b>Decrypting Data... ⚡</b>"),
-        ("████████████  95%", "<b>Finalizing... ✨</b>"),
-        ("████████████  100%", "<b>Success! ✅</b>")
-    ]
-    for bar, text in stages:
-        await asyncio.sleep(0.5)
-        try: await status.edit_text(f"{bar}\n<blockquote>{text}</blockquote>")
-        except: pass
-
-    try:
-        r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
-        link = r.get("bypassed") or r.get("url") or r.get("result")
-        if isinstance(link, dict): link = link.get("bypassed") or link.get("url")
-
-        await users_col.update_one({"user_id": message.from_user.id}, {"$inc": {"bypasses": 1}, "$set": {"name": message.from_user.first_name}}, upsert=True)
-
-        res_text = (
-            "<blockquote>"
-            "🏎️ <b>RAJX BYPASS SYSTEM</b> ⚡\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🔗 <b>Original Link :</b>\n"
-            f"<code>{message.text}</code>\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🚀 <b>Bypassed Link :</b>\n"
-            f"<b>{link}</b>\n\n"
-            f"👤 <b>User :</b> {message.from_user.first_name}\n"
-            f"👑 <b>Owner :</b> {DEV_HANDLE}\n"
-            "━━━━━━━━━━━━━━━━━━━━"
-            "</blockquote>"
-        )
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
-        await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
-    except: await status.edit_text("<blockquote>❌ <b>API Error!</b></blockquote>")
-
-# ==================== SYSTEM ====================
+# ==================== HANDLERS ====================
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
+    if users_col is not None:
+        await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
+    
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
-    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
-    await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS BOT</b>\n\nWelcome! Group join karein aur bypass karein.</blockquote>", reply_markup=b.as_markup())
+    b.button(text="‼️ BUY API ‼️", url=BUY_API_LINK)
+    b.button(text="⚡ USE HERE ⚡", url=GROUP_LINK)
+    b.adjust(1)
+    
+    await message.answer_photo(
+        photo=WELCOME_PIC, 
+        caption=f"🏎️ <b>RAJX BYPASS BOT</b>\n\nWelcome <b>{message.from_user.first_name}</b>!\nLinks bypass karne ke liye group join karein.",
+        reply_markup=b.as_markup()
+    )
+
+@dp.message(F.text.startswith("http"))
+async def handle_bypass(message: types.Message):
+    # Log Group
+    if message.chat.type in ["group", "supergroup"] and groups_col is not None:
+        await groups_col.update_one({"group_id": message.chat.id}, {"$set": {"title": message.chat.title}}, upsert=True)
+
+    # Force Join Check
+    if not await check_fj(message.from_user.id):
+        b = InlineKeyboardBuilder()
+        b.row(InlineKeyboardButton(text="📢 Join Channel", url=f"https://t.me/{CHANNELS[0]}"))
+        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify"))
+        return await message.reply("❗ <b>Please Join our channels to use this bot!</b>", reply_markup=b.as_markup())
+
+    # Private Chat Restriction
+    if message.chat.type == "private" and message.from_user.id != OWNER_ID:
+        b = InlineKeyboardBuilder().button(text="⚡ JOIN GROUP ⚡", url=GROUP_LINK)
+        return await message.reply("❌ <b>Private Bypass is OFF!</b>\n\nBypass karne ke liye group join karein.", reply_markup=b.as_markup())
+
+    # Progress Animation
+    status = await message.reply("⏳ <b>Initializing...</b>")
+    stages = ["█░░░ 25%", "████░ 50%", "███████ 75%", "██████████ 100%"]
+    for s in stages:
+        await asyncio.sleep(0.4)
+        try: await status.edit_text(f"🚀 <b>Processing:</b>\n<code>{s}</code>")
+        except: pass
+
+    # API Call
+    try:
+        r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=20).json()
+        # API Response format check
+        link = r.get("bypassed") or r.get("url") or r.get("result")
+        if isinstance(link, dict): link = link.get("url")
+
+        if not link: raise Exception("No Link")
+
+        if users_col is not None:
+            await users_col.update_one({"user_id": message.from_user.id}, {"$inc": {"bypasses": 1}}, upsert=True)
+
+        res_text = (
+            "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔗 <b>Link:</b> {link}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>By:</b> {message.from_user.first_name}"
+        )
+        await status.edit_text(res_text, disable_web_page_preview=True)
+    except Exception as e:
+        await status.edit_text(f"❌ <b>Bypass Failed!</b>\nReason: API down ya galat link.")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
     if await check_fj(cb.from_user.id):
-        await cb.answer("✅ Verified!", show_alert=True)
+        await cb.answer("✅ Verification Successful!", show_alert=True)
         await cb.message.delete()
-    else: await cb.answer("❌ Join Dono Channels!", show_alert=True)
+    else:
+        await cb.answer("❌ Abhi bhi join nahi kiya!", show_alert=True)
 
-server = Flask(__name__)
-@server.route('/')
-def st(): return "Live"
+# ==================== RUNNER ====================
+app = Flask(__name__)
+@app.route('/')
+def home(): return "Bot is Online"
+
+def run_flask():
+    app.run(host="0.0.0.0", port=10000)
 
 async def main():
     await init_db()
-    Thread(target=lambda: server.run(host="0.0.0.0", port=10000), daemon=True).start()
-    await dp.start_polling(bot, skip_updates=True)
+    Thread(target=run_flask, daemon=True).start()
+    print("🤖 Bot Started...")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
