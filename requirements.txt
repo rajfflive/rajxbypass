@@ -3,3 +3,5 @@ cloudscraper
 flask
 motor
 pytz
+dnspython
+aiohttp
