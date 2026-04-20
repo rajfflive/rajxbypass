@@ -1,4 +1,4 @@
-import os, asyncio, cloudscraper, datetime, pytz, json
+import os, asyncio, cloudscraper, datetime, pytz, ast
 from flask import Flask
 from threading import Thread
 from aiogram import Bot, Dispatcher, types, F
@@ -16,12 +16,14 @@ MONGO_URL = os.environ.get("MONGO_URL")
 OWNER_ID = 8154922225 
 DEV_HANDLE = "@rajfflive"
 
+# --- 📢 LINKS ---
 CHANNELS = ["-1003898508261", "ffofcchat"] 
 CHANNEL_1_LINK = "https://t.me/+HpoHOHMq0VpiYWVl" 
 GROUP_LINK = "https://t.me/ffofcchat"
 BUY_API_LINK = "https://t.me/visitpornhub"
 WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
 
+# ==================== DATABASE & BOT SETUP ====================
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 scraper = cloudscraper.create_scraper()
@@ -53,7 +55,7 @@ async def check_fj(u_id):
 async def cmd_stats(message: types.Message):
     u = await users_col.count_documents({}) if users_col else 0
     g = await groups_col.count_documents({}) if groups_col else 0
-    await message.reply(f"📊 Stats: Users: {u} | Groups: {g}")
+    await message.reply(f"📊 <b>Stats:</b>\nUsers: {u}\nGroups: {g}")
 
 @dp.message(Command("broadcast"), F.from_user.id == OWNER_ID)
 async def cmd_broadcast(message: types.Message):
@@ -61,20 +63,24 @@ async def cmd_broadcast(message: types.Message):
     users = await users_col.find().to_list(None) if users_col else []
     groups = await groups_col.find().to_list(None) if groups_col else []
     targets = list(set([u['user_id'] for u in users] + [g['group_id'] for g in groups]))
+    sent = 0
     for t_id in targets:
-        try: await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
+        try: 
+            await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
+            sent += 1
         except: pass
-    await message.reply("📢 Broadcast Done!")
+    await message.reply(f"📢 <b>Broadcast Done!</b> Sent to {sent} users/groups.")
 
 # ==================== 🏎️ MAIN LOGIC ====================
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    if users_col: await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
+    if users_col: 
+        await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
     b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="success"))
-    await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome!</blockquote>", reply_markup=b.as_markup())
+    await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome! Send link to bypass.</blockquote>", reply_markup=b.as_markup())
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
@@ -82,48 +88,56 @@ async def handle_bypass(message: types.Message):
         return await message.reply("❌ <b>PRIVATE BYPASS DISABLED!</b>")
 
     if not await check_fj(message.from_user.id):
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="📢 Join Channel", url=CHANNEL_1_LINK)).row(InlineKeyboardButton(text="Verify ✅", callback_data="verify"))
-        return await message.reply("❗ <b>ACCESS DENIED!</b>", reply_markup=b.as_markup())
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
+        return await message.reply("❗ <b>ACCESS DENIED! Join our channel.</b>", reply_markup=b.as_markup())
 
+    # --- 🏎️ 10 STAGES PROCESSING ---
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
-    
-    try:
-        # --- 🛡️ THE HARD FIX ---
-        raw_res = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).text
-        try:
-            r = json.loads(raw_res) # ज़बरदस्ती JSON में बदलो
-        except:
-            r = raw_res
+    stages = [
+        ("█░░░░░░░░░░░  10%", "Connecting..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
+        ("███░░░░░░░░░  30%", "Safety Check..."), ("████░░░░░░░░  40%", "Solving Captcha..."),
+        ("█████░░░░░░░  50%", "Extracting Data..."), ("██████░░░░░░  60%", "Bypassing Links..."),
+        ("████████░░░░  75%", "Decrypting URL..."), ("██████████░░  85%", "Finalizing Result..."),
+        ("████████████  95%", "Generating Link..."), ("████████████  100%", "Success! ✅")
+    ]
+    for bar, text in stages:
+        await asyncio.sleep(0.1)
+        try: await status.edit_text(f"{bar}\n<blockquote>{text}</blockquote>")
+        except: pass
 
-        if isinstance(r, dict):
-            link = r.get("bypassed") or r.get("url") or r.get("result")
-            time_taken = r.get("time_taken") or "1.5s"
-        else:
-            link = r
-            time_taken = "N/A"
+    try:
+        raw_res = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).text
+        
+        try:
+            data = ast.literal_eval(raw_res)
+            link = data.get("bypassed", "Error")
+            time_val = data.get("time_taken", "N/A")
+            usage_val = data.get("usage_count", "N/A")
+        except:
+            link = raw_res
+            time_val, usage_val = "N/A", "N/A"
 
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
 
+        # --- 🏎️ CLEAN SEPARATED RESPONSE ---
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👤 <b>User:</b> {message.from_user.first_name}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔗 <b>Original:</b>\n<code>{message.text.strip()}</code>\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🚀 <b>Bypassed Link:</b>\n{link}\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"⚡ <b>Time Taken:</b> <code>{time_taken}</code>\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔗 <b>Original:</b>\n<code>{message.text.strip()}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🚀 <b>Bypassed Link:</b>\n{link}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"⚡ <b>Time Taken:</b> <code>{time_val}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📊 <b>Usage Count:</b> <code>{usage_val}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"🕒 <b>Time:</b> <code>{time_now}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👑 <b>Owner:</b> {DEV_HANDLE}\n\n━━━━━━━━━━━━━━━━━━━━"
+            f"👑 <b>Owner:</b> {DEV_HANDLE}\n━━━━━━━━━━━━━━━━━━━━"
             "</blockquote>"
         )
         
         b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
-    except Exception as e:
-        await status.edit_text(f"❌ <b>API ERROR!</b>\n<code>{e}</code>")
+    except:
+        await status.edit_text("❌ <b>API ERROR!</b>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
@@ -141,6 +155,7 @@ async def main():
     await init_db()
     await bot.delete_webhook(drop_pending_updates=True)
     Thread(target=lambda: server.run(host="0.0.0.0", port=10000), daemon=True).start()
+    print("🤖 Bot Ready")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
