@@ -122,7 +122,7 @@ async def handle_bypass(message: types.Message):
         b = InlineKeyboardBuilder()
         # BLUE COLOUR BUTTONS ADDED BELOW
         b.row(
-            InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/+QGUC_gVz7KdiNjVl", style="primary"),
+            InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/keygeneratorapk", style="primary"),
             InlineKeyboardButton(text="💬 Join Group", url="https://t.me/ffofcchat", style="primary")
         )
         b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
