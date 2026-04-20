@@ -91,7 +91,6 @@ async def handle_bypass(message: types.Message):
         b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
         return await message.reply("❗ <b>ACCESS DENIED! Join our channel.</b>", reply_markup=b.as_markup())
 
-    # --- 🏎️ 10 STAGES PROCESSING ---
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
     stages = [
         ("█░░░░░░░░░░░  10%", "Connecting..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
@@ -106,21 +105,19 @@ async def handle_bypass(message: types.Message):
         except: pass
 
     try:
-        raw_res = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).text
+        # API Response parsing fix
+        response = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30)
+        data = response.json() # Direct JSON parse
         
-        try:
-            data = ast.literal_eval(raw_res)
-            link = data.get("bypassed", "Error")
-            time_val = data.get("time_taken", "N/A")
-            usage_val = data.get("usage_count", "N/A")
-        except:
-            link = raw_res
-            time_val, usage_val = "N/A", "N/A"
+        # Extracting from nested 'result' key
+        res_inner = data.get("result", {})
+        link = res_inner.get("bypassed", "Error")
+        time_val = res_inner.get("time_taken", "N/A")
+        usage_val = res_inner.get("usage_count", "N/A")
 
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
 
-        # --- 🏎️ CLEAN SEPARATED RESPONSE ---
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
