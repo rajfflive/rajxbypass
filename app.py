@@ -21,7 +21,7 @@ OWNER_ID = 8154922225
 DEV_HANDLE = "@rajxcheats"
 CHANNELS = ["rajxcheats", "ffofcchat"] 
 GROUP_LINK = "https://t.me/ffofcchat"
-WELCOME_PIC = "https://telegra.ph/file/0c4456956627063229b01.jpg"
+WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
