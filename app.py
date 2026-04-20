@@ -39,6 +39,49 @@ async def init_db():
             print("✅ Database Connected")
         except: print("⚠️ DB Error")
 
+# ==================== OWNER COMMANDS ====================
+
+@dp.message(Command("stats"), F.from_user.id == OWNER_ID)
+async def cmd_stats(message: types.Message):
+    u_count = await users_col.count_documents({}) if users_col else 0
+    g_count = await groups_col.count_documents({}) if groups_col else 0
+    
+    # Calculate total bypasses
+    pipeline = [{"$group": {"_id": None, "total": {"$sum": "$bypasses"}}}]
+    res = await users_col.aggregate(pipeline).to_list(1) if users_col else []
+    total_b = res[0]['total'] if res else 0
+
+    stats_text = (
+        "📈 <b>ULTIMATE BOT STATS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Total Users:</b> <code>{u_count}</code>\n"
+        f"👥 <b>Total Groups:</b> <code>{g_count}</code>\n"
+        f"🏎️ <b>Total Bypasses:</b> <code>{total_b}</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━"
+    )
+    await message.reply(stats_text)
+
+@dp.message(Command("broadcast"), F.from_user.id == OWNER_ID)
+async def cmd_broadcast(message: types.Message):
+    if not message.reply_to_message:
+        return await message.reply("❌ Reply to a message to broadcast!")
+    
+    users = await users_col.find().to_list(10000) if users_col else []
+    groups = await groups_col.find().to_list(10000) if groups_col else []
+    targets = list(set([u['user_id'] for u in users] + [g['group_id'] for g in groups]))
+    
+    ok, fail = 0, 0
+    msg = await message.reply(f"🚀 <b>Broadcasting to {len(targets)} targets...</b>")
+    
+    for t_id in targets:
+        try:
+            await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
+            ok += 1
+            await asyncio.sleep(0.05) # Prevent flood
+        except: fail += 1
+        
+    await msg.edit_text(f"📢 <b>Broadcast Completed!</b>\n\n✅ Success: {ok}\n❌ Failed: {fail}")
+
 # ==================== HELPERS ====================
 
 async def check_fj(u_id):
@@ -50,7 +93,7 @@ async def check_fj(u_id):
         except: continue
     return True
 
-# ==================== HANDLERS ====================
+# ==================== BYPASS HANDLER ====================
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
@@ -72,25 +115,21 @@ async def start(message: types.Message):
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    # Track Group
     if message.chat.type in ["group", "supergroup"] and groups_col:
         await groups_col.update_one({"group_id": message.chat.id}, {"$set": {"title": message.chat.title}}, upsert=True)
 
-    # Force Join Check
     if not await check_fj(message.from_user.id):
         b = InlineKeyboardBuilder()
         b.row(InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/rajxcheats"), InlineKeyboardButton(text="💬 Join Group", url="https://t.me/ffofcchat"))
         b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
         return await message.reply("<blockquote>❗ <b>ACCESS DENIED!</b>\n\nYou must join our channels to use this bot.</blockquote>", reply_markup=b.as_markup())
 
-    # Private Chat Restriction
     if message.chat.type == "private" and message.from_user.id != OWNER_ID:
         b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE IN GROUP ⚡", url=GROUP_LINK, style="success"))
         return await message.reply("<blockquote>❌ <b>PRIVATE BYPASS DISABLED!</b>\n\nPlease send your links in the group.</blockquote>", reply_markup=b.as_markup())
 
-    # --- 8 STAGES ANIMATED PROGRESS ---
+    # --- PROGRESS ANIMATION ---
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing Engine... ⚙️</b></blockquote>")
-    
     stages = [
         ("█░░░░░░░░░░░  12%", "<b>Connecting Proxy... 🛰️</b>"),
         ("██░░░░░░░░░░  25%", "<b>Bypassing Ads... ⛈️</b>"),
@@ -103,12 +142,10 @@ async def handle_bypass(message: types.Message):
     ]
 
     for bar, text in stages:
-        await asyncio.sleep(0.5)
-        try:
-            await status.edit_text(f"{bar}\n<blockquote>{text}</blockquote>")
+        await asyncio.sleep(0.4)
+        try: await status.edit_text(f"{bar}\n<blockquote>{text}</blockquote>")
         except: pass
 
-    # API Call
     try:
         r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
         link = r.get("bypassed") or r.get("url") or r.get("result")
@@ -117,7 +154,6 @@ async def handle_bypass(message: types.Message):
         if users_col:
             await users_col.update_one({"user_id": message.from_user.id}, {"$inc": {"bypasses": 1}}, upsert=True)
 
-        # Updated Response Format
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n"
@@ -133,7 +169,7 @@ async def handle_bypass(message: types.Message):
         b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
     except:
-        await status.edit_text("<blockquote>❌ <b>API ERROR!</b>\nUnable to bypass this link. Please try another one.</blockquote>")
+        await status.edit_text("<blockquote>❌ <b>API ERROR!</b>\nUnable to bypass. Server might be down.</blockquote>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
