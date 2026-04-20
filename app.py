@@ -15,7 +15,7 @@ MONGO_URL = os.environ.get("MONGO_URL")
 
 OWNER_ID = 8154922225 
 DEV_HANDLE = "@rajfflive"
-CHANNELS = ["keygeneratorapk", "ffofcchat"] 
+CHANNELS = ["-1003898508261", "ffofcchat"] 
 GROUP_LINK = "https://t.me/ffofcchat"
 WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
 BUY_API_LINK = "https://t.me/visitpornhub"
@@ -122,7 +122,7 @@ async def handle_bypass(message: types.Message):
         b = InlineKeyboardBuilder()
         # BLUE COLOUR BUTTONS ADDED BELOW
         b.row(
-            InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/keygeneratorapk", style="primary"),
+            InlineKeyboardButton(text="📢 Join Channel", url="https://t.me/+HpoHOHMq0VpiYWVl", style="primary"),
             InlineKeyboardButton(text="💬 Join Group", url="https://t.me/ffofcchat", style="primary")
         )
         b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
