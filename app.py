@@ -25,37 +25,26 @@ bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 scraper = cloudscraper.create_scraper()
 
-# --- Database ---
+# Database Variables
 users_col = None
 codes_col = None
 
 async def init_db():
     global users_col, codes_col
-    try:
-        client = AsyncIOMotorClient(MONGO_URL)
-        db = client.bypass_bot
-        users_col = db.users
-        codes_col = db.codes
-        print("✅ Advanced System Live")
-    except: print("⚠️ DB Connection Failed")
-
-# ==================== OWNER TOOLS (NO BUTTONS) ====================
-
-@dp.message(Command("gen"), F.from_user.id == OWNER_ID)
-async def cmd_gen(message: types.Message, command: CommandObject):
-    if not command.args: return await message.reply("Usage: /gen [amount]")
-    code = f"RAJX-{random.randint(100, 999)}-{random.randint(100, 999)}"
-    await codes_col.insert_one({"code": code, "amount": int(command.args), "used": False})
-    await message.reply(f"<blockquote>💎 <b>CODE GENERATED</b>\nCode: <code>{code}</code>\nValue: {command.args} Credits</blockquote>")
-
-@dp.message(Command("stats"), F.from_user.id == OWNER_ID)
-async def cmd_stats(message: types.Message):
-    u_count = await users_col.count_documents({})
-    await message.reply(f"<blockquote>📈 <b>STATS</b>\nTotal Users: {u_count}</blockquote>")
+    if MONGO_URL:
+        try:
+            # Short timeout to prevent Render hang
+            client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+            db = client.bypass_bot
+            users_col, codes_col = db.users, db.codes
+            await client.server_info()
+            print("✅ DB Connected")
+        except: print("⚠️ DB Connection Failed - Running in Offline Mode")
 
 # ==================== HELPERS ====================
 
-async def get_user(u_id, name="User"):
+async def get_user_data(u_id, name="User"):
+    if users_col is None: return {"balance": 2, "name": name}
     user = await users_col.find_one({"user_id": u_id})
     if not user:
         user = {"user_id": u_id, "name": name, "balance": 2, "refer_count": 0, "last_spin": None}
@@ -63,6 +52,7 @@ async def get_user(u_id, name="User"):
     return user
 
 async def check_fj(u_id):
+    if u_id == OWNER_ID: return True
     for c in CHANNELS:
         try:
             m = await bot.get_chat_member(f"@{c}", u_id)
@@ -70,150 +60,113 @@ async def check_fj(u_id):
         except: continue
     return True
 
-def get_main_menu(u_id, ref_link):
+# ==================== UI MENUS ====================
+
+def main_menu_btn(u_id, ref_link):
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="🎰 Daily Spin", callback_data="spin_now", style="success"))
-    b.row(InlineKeyboardButton(text="🏆 Leaderboard", callback_data="show_lb"),
-          InlineKeyboardButton(text="💰 My Balance", callback_data="show_bal", style="success"))
-    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
-    b.row(InlineKeyboardButton(text="⚡ USE IN GROUP ⚡", url=GROUP_LINK, style="success"))
+    b.row(InlineKeyboardButton(text="🎰 Daily Spin", callback_data="spin"),
+          InlineKeyboardButton(text="💰 Balance", callback_data="bal"), style="success")
+    b.row(InlineKeyboardButton(text="🏆 Leaderboard", callback_data="lb"),
+          InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK), style="danger")
+    b.row(InlineKeyboardButton(text="⚡ USE IN GROUP ⚡", url=GROUP_LINK), style="success")
     return b.as_markup()
 
-# ==================== SYSTEM HANDLERS ====================
+# ==================== HANDLERS ====================
 
 @dp.message(Command("start"))
-async def start(message: types.Message, command: CommandObject):
+async def start_cmd(message: types.Message, command: CommandObject):
     u_id = message.from_user.id
-    user_exists = await users_col.find_one({"user_id": u_id})
-    
-    if not user_exists and command.args:
+    # Refer Logic
+    if users_col and command.args:
         ref_id = int(command.args)
-        if ref_id != u_id:
+        if ref_id != u_id and not await users_col.find_one({"user_id": u_id}):
             await users_col.update_one({"user_id": ref_id}, {"$inc": {"balance": 2, "refer_count": 1}})
-            try: await bot.send_message(ref_id, "<blockquote>🎉 <b>Referral Success!</b>\nYou earned 2 Credits.</blockquote>")
+            try: await bot.send_message(ref_id, "<blockquote>🎁 <b>+2 Credits Received from Referral!</b></blockquote>")
             except: pass
 
-    user = await get_user(u_id, message.from_user.first_name)
+    user = await get_user_data(u_id, message.from_user.first_name)
     ref_link = f"https://t.me{(await bot.get_me()).username}?start={u_id}"
-    bal = '∞' if u_id == OWNER_ID else user.get('balance', 0)
+    bal = "∞" if u_id == OWNER_ID else user.get('balance', 2)
 
-    msg = (
+    await message.answer_photo(photo=WELCOME_PIC, caption=(
         "<blockquote>"
         f"🏎️ <b>RAJX BYPASS SYSTEM</b>\n\n"
         f"💰 <b>Wallet:</b> {bal} Credits\n"
         f"🔗 <b>Invite:</b> <code>{ref_link}</code>\n\n"
-        "Earn credits via Spin or Invites to bypass links!"
+        "Bypass costs 1 Credit. New users get 2 free!"
         "</blockquote>"
-    )
-    await message.answer_photo(photo=WELCOME_PIC, caption=msg, reply_markup=get_main_menu(u_id, ref_link))
+    ), reply_markup=main_menu_btn(u_id, ref_link))
 
-@dp.callback_query(F.data == "show_bal")
-async def cb_bal(cb: types.CallbackQuery):
-    user = await get_user(cb.from_user.id)
-    bal = '∞' if cb.from_user.id == OWNER_ID else user.get('balance', 0)
-    await cb.answer(f"💰 Balance: {bal} Credits", show_alert=True)
-
-@dp.callback_query(F.data == "spin_now")
-async def cb_spin(cb: types.CallbackQuery):
-    user = await get_user(cb.from_user.id)
+@dp.callback_query(F.data == "spin")
+async def spin_cb(cb: types.CallbackQuery):
+    u_id = cb.from_user.id
+    user = await get_user_data(u_id)
     now = datetime.now()
     if user.get("last_spin") and now < user.get("last_spin") + timedelta(days=1):
-        rem = (user.get("last_spin") + timedelta(days=1)) - now
-        return await cb.answer(f"⏳ Cooldown! Try in {rem.seconds // 3600}h.", show_alert=True)
+        return await cb.answer("⏳ Come back tomorrow!", show_alert=True)
 
-    # Animation
-    await cb.message.edit_caption(caption="🎰 <b>Spinning...</b>\n<blockquote>[ 🍎 | 🍋 | 🍒 ]</blockquote>")
+    await cb.message.edit_caption(caption="🎰 <b>Spinning...</b>\n<blockquote>[ 💎 | 🍒 | 🔔 ]</blockquote>")
     await asyncio.sleep(1)
-    
     win = random.randint(1, 5)
-    await users_col.update_one({"user_id": cb.from_user.id}, {"$inc": {"balance": win}, "$set": {"last_spin": now}})
-    await cb.answer(f"🎰 JACKPOT! You won {win} Credits!", show_alert=True)
-    await start(cb.message, CommandObject(args=None))
+    if users_col: await users_col.update_one({"user_id": u_id}, {"$inc": {"balance": win}, "$set": {"last_spin": now}})
+    await cb.answer(f"🎉 Won {win} Credits!", show_alert=True)
+    await start_cmd(cb.message, CommandObject(args=None))
 
-@dp.callback_query(F.data == "show_lb")
-async def cb_lb(cb: types.CallbackQuery):
-    top = await users_col.find().sort("refer_count", -1).limit(5).to_list(5)
-    text = "<blockquote>🏆 <b>TOP REFERRERS</b>\n\n"
-    for i, u in enumerate(top, 1):
-        text += f"{i}. {u.get('name', 'User')} - {u.get('refer_count', 0)} Refers\n"
-    text += "</blockquote>"
-    b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="🔙 Back", callback_data="back_start", style="danger"))
-    await cb.message.edit_caption(caption=text, reply_markup=b.as_markup())
-
-@dp.callback_query(F.data == "back_start")
-async def cb_back(cb: types.CallbackQuery):
-    await start(cb.message, CommandObject(args=None))
-
-# ==================== BYPASS LOGIC ====================
+@dp.message(Command("gen"), F.from_user.id == OWNER_ID)
+async def gen_code(message: types.Message, command: CommandObject):
+    if not codes_col or not command.args: return
+    code = f"RAJX-{random.randint(100,999)}"
+    await codes_col.insert_one({"code": code, "amount": int(command.args), "used": False})
+    await message.reply(f"<blockquote>Code: <code>{code}</code>\nValue: {command.args}</blockquote>")
 
 @dp.message(F.text.startswith("http"))
-async def handle_bypass(message: types.Message):
+async def bypass_handler(message: types.Message):
     u_id = message.from_user.id
-    user = await get_user(u_id, message.from_user.first_name)
+    user = await get_user_data(u_id)
 
     # Force Join - Group Only
-    if message.chat.type in ["group", "supergroup"]:
-        if not await check_fj(u_id):
-            b = InlineKeyboardBuilder()
-            b.row(InlineKeyboardButton(text="📢 Join Channel", url=f"https://t.merajxcheats", style="danger"))
-            b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
-            return await message.reply("<blockquote>❗ <b>JOIN CHANNELS TO BYPASS!</b></blockquote>", reply_markup=b.as_markup())
+    if message.chat.type != "private" and not await check_fj(u_id):
+        b = InlineKeyboardBuilder().button(text="📢 Join Channel", url=f"https://t.merajxcheats").as_markup()
+        return await message.reply("<blockquote>❗ <b>Join Channel First!</b></blockquote>", reply_markup=b)
 
-    # Credit Check
+    # Credits Check
     if u_id != OWNER_ID and user.get("balance", 0) < 1:
-        ref = f"https://t.me{(await bot.get_me()).username}?start={u_id}"
-        return await message.reply(f"<blockquote>⚠️ <b>NO CREDITS!</b>\nInvite friends to earn.\n\n🔗 <code>{ref}</code></blockquote>")
+        return await message.reply("<blockquote>⚠️ <b>NO CREDITS!</b>\nInvite friends to earn more.</blockquote>")
 
-    # Private Check
+    # Private Restriction
     if message.chat.type == "private" and u_id != OWNER_ID:
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE IN GROUP ⚡", url=GROUP_LINK, style="success"))
-        return await message.reply("<blockquote>❌ <b>PRIVATE MODE OFF!</b></blockquote>", reply_markup=b.as_markup())
+        return await message.reply("<blockquote>❌ <b>USE IN GROUP!</b></blockquote>")
 
-    status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing Engine... ⚙️</b></blockquote>")
-    stages = [("██████░░░░░░  50%", "<b>Processing... 🚀</b>"), ("████████████  100%", "<b>Success! ✅</b>")]
-    for bar, txt in stages:
-        await asyncio.sleep(0.5); await status.edit_text(f"{bar}\n<blockquote>{txt}</blockquote>")
-
+    status = await message.reply("⏳ <b>Processing...</b>")
     try:
-        r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
+        r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=20).json()
         link = r.get("bypassed") or r.get("url") or r.get("result")
         
-        cost_txt = "Unlimited"
-        if u_id != OWNER_ID:
+        if u_id != OWNER_ID and users_col:
             await users_col.update_one({"user_id": u_id}, {"$inc": {"balance": -1}})
-            cost_txt = f"{user.get('balance', 0) - 1} Credits"
 
         res = (
             "<blockquote>"
-            "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n"
+            "🏎️ <b>BYPASS SUCCESSFUL!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔗 <b>Original:</b> <code>{message.text[:20]}...</code>\n\n"
-            f"🚀 <b>Bypassed Link:</b>\n<b>{link}</b>\n\n"
-            f"💰 <b>Wallet:</b> {cost_txt}\n"
-            f"👑 <b>Owner:</b> {DEV_HANDLE}\n\n"
+            f"🚀 <b>Link:</b> <b>{link}</b>\n\n"
+            f"💰 <b>Wallet:</b> {'∞' if u_id == OWNER_ID else user.get('balance', 0)-1} Credits\n"
             "━━━━━━━━━━━━━━━━━━━━"
             "</blockquote>"
         )
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
-        await status.edit_text(res, reply_markup=b.as_markup(), disable_web_page_preview=True)
+        b = InlineKeyboardBuilder().button(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger").as_markup()
+        await status.edit_text(res, reply_markup=b)
     except: await status.edit_text("<blockquote>❌ <b>API ERROR!</b></blockquote>")
 
-@dp.callback_query(F.data == "verify")
-async def verify(cb: types.CallbackQuery):
-    if await check_fj(cb.from_user.id):
-        await cb.answer("✅ Verified!", show_alert=True)
-        await cb.message.delete()
-    else: await cb.answer("❌ Join both channels first!", show_alert=True)
-
 # ==================== RUNNER ====================
-server = Flask(__name__)
-@server.route('/')
-def st(): return "Live"
+app = Flask(__name__)
+@app.route('/')
+def h(): return "OK"
 
 async def main():
     await init_db()
     await bot.delete_webhook(drop_pending_updates=True)
-    Thread(target=lambda: server.run(host="0.0.0.0", port=10000), daemon=True).start()
+    Thread(target=lambda: app.run(host="0.0.0.0", port=10000), daemon=True).start()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
