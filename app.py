@@ -74,6 +74,7 @@ async def cmd_broadcast(message: types.Message):
 async def start(message: types.Message):
     if users_col: await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
     b = InlineKeyboardBuilder()
+    # Note: Telegram doesn't support 'style' for URL buttons, but I've kept the structure you like.
     b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
     b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
     await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome! Send link to bypass.</blockquote>", reply_markup=b.as_markup())
@@ -105,14 +106,13 @@ async def handle_bypass(message: types.Message):
         except: pass
 
     try:
-        # Fetching from API
-        response = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
+        r = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
         
-        # --- FIX: Properly extracting the string from JSON ---
-        if isinstance(response, dict):
-            link = response.get("bypassed") or response.get("url") or response.get("result")
+        # Cleanly extract only the link string
+        if isinstance(r, dict):
+            link = r.get("bypassed") or r.get("url") or r.get("result")
         else:
-            link = response
+            link = r
 
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
@@ -120,12 +120,14 @@ async def handle_bypass(message: types.Message):
         if not link or str(link).lower() == "none":
              return await status.edit_text("<blockquote>❌ <b>API Error: Link Not Found!</b></blockquote>")
 
-        # --- FIX: Formatting as Original [Space] Bypassed ---
+        # Response with: Original [Space] Bypassed Link
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👤 <b>User:</b> {message.from_user.first_name}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🔗 <b>Links:</b>\n<code>{message.text.strip()}</code> {link}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔗 <b>Links:</b>\n"
+            f"<code>{message.text.strip()}</code> {link}\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
             f"🕒 <b>Time:</b> <code>{time_now}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👑 <b>Owner:</b> {DEV_HANDLE}\n\n━━━━━━━━━━━━━━━━━━━━"
             "</blockquote>"
