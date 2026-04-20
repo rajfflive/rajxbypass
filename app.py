@@ -86,7 +86,7 @@ async def cmd_start(message: types.Message, command: CommandObject):
 
     user_data = await get_user_data(user_id, user_name)
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="‼️ BUY PAID API ‼️", url="https://t.me/rajxcheats", style="danger"))
+    builder.row(InlineKeyboardButton(text="‼️ BUY PAID API ‼️", url="https://t.me/visitpornhub", style="danger"))
     builder.row(InlineKeyboardButton(text="💰 Balance", callback_data="check_bal", style="success"))
     builder.row(InlineKeyboardButton(text="🏆 Leaderboard", callback_data="leaderboard", style="primary"))
     builder.row(InlineKeyboardButton(text="🎰 Lucky Spin", callback_data="spin_now", style="success"))
