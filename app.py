@@ -8,9 +8,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import InlineKeyboardButton, ReactionTypeEmoji
 from motor.motor_asyncio import AsyncIOMotorClient
 
+# ==================== 🛠️ CONFIGURATION ====================
 TOKEN = os.environ.get("BOT_TOKEN")
 API_URL = os.environ.get("NEW_API_URL")
 MONGO_URL = os.environ.get("MONGO_URL")
+
 OWNER_ID = int(os.environ.get("OWNER_ID", "8154922225"))
 DEV_HANDLE = "@rajfflive"
 
@@ -20,6 +22,7 @@ GROUP_LINK = "https://t.me/ffofcchat"
 BUY_API_LINK = "https://t.me/visitpornhub"
 WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
 
+# ==================== DATABASE & BOT SETUP ====================
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 scraper = cloudscraper.create_scraper()
@@ -33,11 +36,6 @@ async def init_db():
             db = client.bypass_bot
             users_col, groups_col = db.users, db.groups
             print("✅ [DB] MongoDB Initialized!")
-            try:
-                await client.admin.command('ping')
-                print("✅ [DB] Ping Success!")
-            except Exception as e:
-                print(f"❌ [DB] Ping Failed: {e}")
         except Exception as e:
             print(f"❌ [DB] Failed: {e}")
     else:
@@ -81,6 +79,8 @@ async def check_fj(u_id):
             return False
     return True
 
+# ==================== 👑 OWNER COMMANDS ====================
+
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
     if message.from_user.id != OWNER_ID: return
@@ -107,6 +107,8 @@ async def cmd_broadcast(message: types.Message):
             print(f"❌ [BROADCAST FAIL] {t_id} | {e}")
     print(f"📢 [BROADCAST DONE] Sent: {sent} | Failed: {failed}")
     await message.reply(f"📢 <b>Broadcast Done!</b> Sent: {sent} | Failed: {failed}")
+
+# ==================== 🏎️ MAIN LOGIC ====================
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
@@ -196,6 +198,7 @@ async def verify(cb: types.CallbackQuery):
         print(f"❌ [VERIFY FAIL] {cb.from_user.id}")
         await cb.answer("❌ Join BOTH channel and group first!", show_alert=True)
 
+# ==================== RUNNER ====================
 server = Flask(__name__)
 
 @server.route('/')
