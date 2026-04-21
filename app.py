@@ -8,33 +8,22 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import InlineKeyboardButton, ReactionTypeEmoji
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# ==================== 🛠️ CONFIGURATION ====================
 TOKEN = os.environ.get("BOT_TOKEN")
 API_URL = os.environ.get("NEW_API_URL")
 MONGO_URL = os.environ.get("MONGO_URL")
-
 OWNER_ID = int(os.environ.get("OWNER_ID", "8154922225"))
 DEV_HANDLE = "@rajfflive"
 
-# --- 📢 LINKS ---
 CHANNELS = ["-1003898508261", "ffofcchat"]
 CHANNEL_LINK = "https://t.me/+HpoHOHMq0VpiYWVl"
 GROUP_LINK = "https://t.me/ffofcchat"
 BUY_API_LINK = "https://t.me/visitpornhub"
 WELCOME_PIC = "https://i.ibb.co/8L91y1CP/6ee42acc1338.jpg"
 
-# ==================== DATABASE & BOT SETUP ====================
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
 dp = Dispatcher()
 scraper = cloudscraper.create_scraper()
 users_col, groups_col = None, None
-
-async def ping_db(client):
-    try:
-        await client.admin.command('ping')
-        print("✅ [DB] MongoDB Ping Success!")
-    except Exception as e:
-        print(f"❌ [DB] MongoDB Ping Failed: {e}")
 
 async def init_db():
     global users_col, groups_col
@@ -43,52 +32,38 @@ async def init_db():
             client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000)
             db = client.bypass_bot
             users_col, groups_col = db.users, db.groups
-            asyncio.create_task(ping_db(client))
             print("✅ [DB] MongoDB Initialized!")
+            try:
+                await client.admin.command('ping')
+                print("✅ [DB] Ping Success!")
+            except Exception as e:
+                print(f"❌ [DB] Ping Failed: {e}")
         except Exception as e:
-            print(f"❌ [DB] MongoDB Failed: {e}")
+            print(f"❌ [DB] Failed: {e}")
     else:
         print("⚠️ [DB] MONGO_URL not set!")
 
 async def save_user(user: types.User):
-    if not users_col:
-        return
+    if not users_col: return
     try:
         existing = await users_col.find_one({"user_id": user.id})
         if not existing:
-            await users_col.insert_one({
-                "user_id": user.id,
-                "name": user.first_name,
-                "username": user.username or "N/A",
-                "joined": datetime.datetime.utcnow()
-            })
+            await users_col.insert_one({"user_id": user.id, "name": user.first_name, "username": user.username or "N/A", "joined": datetime.datetime.utcnow()})
             print(f"🆕 [NEW USER] {user.first_name} | ID: {user.id} | @{user.username or 'N/A'}")
         else:
-            await users_col.update_one(
-                {"user_id": user.id},
-                {"$set": {"name": user.first_name, "username": user.username or "N/A"}}
-            )
+            await users_col.update_one({"user_id": user.id}, {"$set": {"name": user.first_name, "username": user.username or "N/A"}})
     except Exception as e:
         print(f"❌ [SAVE USER ERROR] {e}")
 
 async def save_group(chat: types.Chat):
-    if not groups_col:
-        return
+    if not groups_col: return
     try:
         existing = await groups_col.find_one({"group_id": chat.id})
         if not existing:
-            await groups_col.insert_one({
-                "group_id": chat.id,
-                "title": chat.title or "Unknown",
-                "username": chat.username or "N/A",
-                "joined": datetime.datetime.utcnow()
-            })
+            await groups_col.insert_one({"group_id": chat.id, "title": chat.title or "Unknown", "username": chat.username or "N/A", "joined": datetime.datetime.utcnow()})
             print(f"🆕 [NEW GROUP] {chat.title} | ID: {chat.id} | @{chat.username or 'N/A'}")
         else:
-            await groups_col.update_one(
-                {"group_id": chat.id},
-                {"$set": {"title": chat.title or "Unknown", "username": chat.username or "N/A"}}
-            )
+            await groups_col.update_one({"group_id": chat.id}, {"$set": {"title": chat.title or "Unknown", "username": chat.username or "N/A"}})
     except Exception as e:
         print(f"❌ [SAVE GROUP ERROR] {e}")
 
@@ -106,22 +81,18 @@ async def check_fj(u_id):
             return False
     return True
 
-# ==================== 👑 OWNER COMMANDS ====================
-
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
-    if message.from_user.id != OWNER_ID:
-        return
-    print(f"📊 [OWNER CMD] /stats used by {message.from_user.id}")
+    if message.from_user.id != OWNER_ID: return
+    print(f"📊 [OWNER CMD] /stats by {message.from_user.id}")
     u = await users_col.count_documents({}) if users_col else 0
     g = await groups_col.count_documents({}) if groups_col else 0
     await message.reply(f"📊 <b>Stats:</b>\nUsers: {u}\nGroups: {g}")
 
 @dp.message(Command("broadcast"))
 async def cmd_broadcast(message: types.Message):
-    if message.from_user.id != OWNER_ID:
-        return
-    print(f"📢 [OWNER CMD] /broadcast used by {message.from_user.id}")
+    if message.from_user.id != OWNER_ID: return
+    print(f"📢 [OWNER CMD] /broadcast by {message.from_user.id}")
     if not message.reply_to_message: return await message.reply("❌ Reply to a message!")
     users = await users_col.find().to_list(None) if users_col else []
     groups = await groups_col.find().to_list(None) if groups_col else []
@@ -133,18 +104,15 @@ async def cmd_broadcast(message: types.Message):
             sent += 1
         except Exception as e:
             failed += 1
-            print(f"❌ [BROADCAST FAIL] Target: {t_id} | Error: {e}")
+            print(f"❌ [BROADCAST FAIL] {t_id} | {e}")
     print(f"📢 [BROADCAST DONE] Sent: {sent} | Failed: {failed}")
-    await message.reply(f"📢 <b>Broadcast Done!</b> Sent to {sent} | Failed: {failed}")
-
-# ==================== 🏎️ MAIN LOGIC ====================
+    await message.reply(f"📢 <b>Broadcast Done!</b> Sent: {sent} | Failed: {failed}")
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await save_user(message.from_user)
-    if message.chat.type in ["group", "supergroup"]:
-        await save_group(message.chat)
-    print(f"▶️ [START] User: {message.from_user.first_name} | ID: {message.from_user.id} | Chat: {message.chat.type}")
+    if message.chat.type in ["group", "supergroup"]: await save_group(message.chat)
+    print(f"▶️ [START] {message.from_user.first_name} | ID: {message.from_user.id} | {message.chat.type}")
     b = InlineKeyboardBuilder()
     b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
     b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
@@ -153,17 +121,14 @@ async def start(message: types.Message):
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
     await save_user(message.from_user)
-    if message.chat.type in ["group", "supergroup"]:
-        await save_group(message.chat)
-    print(f"🔗 [BYPASS REQUEST] User: {message.from_user.first_name} | ID: {message.from_user.id} | URL: {message.text.strip()[:60]}...")
-
+    if message.chat.type in ["group", "supergroup"]: await save_group(message.chat)
+    print(f"🔗 [BYPASS] {message.from_user.first_name} | ID: {message.from_user.id} | {message.text.strip()[:60]}...")
     try: await message.react([ReactionTypeEmoji(emoji="👀")])
     except: pass
 
     is_verified = await check_fj(message.from_user.id)
-
     if not is_verified:
-        print(f"🚫 [ACCESS DENIED] User: {message.from_user.id} not joined required channels")
+        print(f"🚫 [ACCESS DENIED] {message.from_user.id}")
         b = InlineKeyboardBuilder()
         b.row(InlineKeyboardButton(text="Join Channel 📢", url=CHANNEL_LINK))
         b.row(InlineKeyboardButton(text="Join Group 💬", url=GROUP_LINK))
@@ -172,7 +137,7 @@ async def handle_bypass(message: types.Message):
         return await message.reply("❗ <b>ACCESS DENIED! Join BOTH our channel and group.</b>", reply_markup=b.as_markup())
 
     if message.chat.type == "private" and message.from_user.id != OWNER_ID:
-        print(f"🚫 [PRIVATE BLOCKED] User: {message.from_user.id} tried in DM")
+        print(f"🚫 [PRIVATE BLOCKED] {message.from_user.id}")
         b = InlineKeyboardBuilder()
         b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
         return await message.reply("❌ <b>PRIVATE BYPASS DISABLED!</b>\n\nUse our official group.", reply_markup=b.as_markup())
@@ -191,22 +156,17 @@ async def handle_bypass(message: types.Message):
         except: pass
 
     try:
-        print(f"🌐 [API CALL] Sending request for user {message.from_user.id}...")
+        print(f"🌐 [API CALL] User: {message.from_user.id}")
         response = scraper.get(f"{API_URL}{message.text.strip()}", timeout=30).json()
         res_data = response.get("result", {})
-
         link = res_data.get("bypassed", "Error")
         time_val = res_data.get("time_taken", "N/A")
         usage_val = res_data.get("usage_count", "N/A")
-
-        print(f"✅ [API SUCCESS] User: {message.from_user.id} | Bypassed: {link[:60]}...")
-
+        print(f"✅ [API SUCCESS] User: {message.from_user.id} | Link: {link[:60]}...")
         try: await message.react([ReactionTypeEmoji(emoji="💯")])
         except: pass
-
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
-
         res_text = (
             "<blockquote>"
             "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -219,25 +179,23 @@ async def handle_bypass(message: types.Message):
             f"👑 <b>Owner:</b> {DEV_HANDLE}\n━━━━━━━━━━━━━━━━━━━━"
             "</blockquote>"
         )
-
         b = InlineKeyboardBuilder()
         b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
     except Exception as e:
-        print(f"❌ [API ERROR] User: {message.from_user.id} | Error: {e}")
+        print(f"❌ [API ERROR] {message.from_user.id} | {e}")
         await status.edit_text("❌ <b>API ERROR!</b>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
     if await check_fj(cb.from_user.id):
-        print(f"✅ [VERIFIED] User: {cb.from_user.id} passed verification")
+        print(f"✅ [VERIFIED] {cb.from_user.id}")
         await cb.answer("✅ Verified!", show_alert=True)
         await cb.message.delete()
     else:
-        print(f"❌ [VERIFY FAIL] User: {cb.from_user.id} not joined")
+        print(f"❌ [VERIFY FAIL] {cb.from_user.id}")
         await cb.answer("❌ Join BOTH channel and group first!", show_alert=True)
 
-# ==================== RUNNER ====================
 server = Flask(__name__)
 
 @server.route('/')
