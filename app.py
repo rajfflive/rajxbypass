@@ -145,10 +145,9 @@ async def start(message: types.Message):
     if message.chat.type in ["group", "supergroup"]:
         await save_group(message.chat)
     print(f"▶️ [START] User: {message.from_user.first_name} | ID: {message.from_user.id} | Chat: {message.chat.type}")
-
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
-    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
+    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
+    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
     await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome! Send link to bypass.</blockquote>", reply_markup=b.as_markup())
 
 @dp.message(F.text.startswith("http"))
@@ -166,15 +165,16 @@ async def handle_bypass(message: types.Message):
     if not is_verified:
         print(f"🚫 [ACCESS DENIED] User: {message.from_user.id} not joined required channels")
         b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="Join Channel 📢", url=CHANNEL_LINK, style="primary"))
-        b.row(InlineKeyboardButton(text="Join Group 💬", url=GROUP_LINK, style="primary"))
-        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success"))
-        b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
+        b.row(InlineKeyboardButton(text="Join Channel 📢", url=CHANNEL_LINK))
+        b.row(InlineKeyboardButton(text="Join Group 💬", url=GROUP_LINK))
+        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify"))
+        b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
         return await message.reply("❗ <b>ACCESS DENIED! Join BOTH our channel and group.</b>", reply_markup=b.as_markup())
 
     if message.chat.type == "private" and message.from_user.id != OWNER_ID:
         print(f"🚫 [PRIVATE BLOCKED] User: {message.from_user.id} tried in DM")
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
+        b = InlineKeyboardBuilder()
+        b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
         return await message.reply("❌ <b>PRIVATE BYPASS DISABLED!</b>\n\nUse our official group.", reply_markup=b.as_markup())
 
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
@@ -220,7 +220,8 @@ async def handle_bypass(message: types.Message):
             "</blockquote>"
         )
 
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
+        b = InlineKeyboardBuilder()
+        b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
     except Exception as e:
         print(f"❌ [API ERROR] User: {message.from_user.id} | Error: {e}")
