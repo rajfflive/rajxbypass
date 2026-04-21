@@ -13,7 +13,7 @@ TOKEN = os.environ.get("BOT_TOKEN")
 API_URL = os.environ.get("NEW_API_URL") 
 MONGO_URL = os.environ.get("MONGO_URL")
 
-OWNER_ID = int(os.environ.get("OWNER_ID", "8154922225"))
+OWNER_ID = 8154922225 
 DEV_HANDLE = "@rajfflive"
 
 # --- 📢 LINKS ---
@@ -33,31 +33,11 @@ async def init_db():
     global users_col, groups_col
     if MONGO_URL:
         try:
-            client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+            client = AsyncIOMotorClient(MONGO_URL)
             db = client.bypass_bot
             users_col, groups_col = db.users, db.groups
-            await client.admin.command('ping')
-            print("✅ [DB] MongoDB Connected!")
-        except Exception as e:
-            print(f"❌ [DB] Connection Failed: {e}")
-    else:
-        print("⚠️ [DB] MONGO_URL not set!")
-
-async def save_user(user: types.User):
-    if not users_col: return
-    await users_col.update_one(
-        {"user_id": user.id},
-        {"$set": {"name": user.first_name, "username": user.username or "N/A", "joined": datetime.datetime.utcnow()}},
-        upsert=True
-    )
-
-async def save_group(chat: types.Chat):
-    if not groups_col: return
-    await groups_col.update_one(
-        {"group_id": chat.id},
-        {"$set": {"title": chat.title or "Unknown", "username": chat.username or "N/A", "joined": datetime.datetime.utcnow()}},
-        upsert=True
-    )
+            print("✅ Database Connected")
+        except: print("⚠️ DB Error")
 
 async def check_fj(u_id):
     if u_id == OWNER_ID: return True
@@ -83,50 +63,54 @@ async def cmd_broadcast(message: types.Message):
     users = await users_col.find().to_list(None) if users_col else []
     groups = await groups_col.find().to_list(None) if groups_col else []
     targets = list(set([u['user_id'] for u in users] + [g['group_id'] for g in groups]))
-    sent, failed = 0, 0
+    sent = 0
     for t_id in targets:
         try: 
             await bot.copy_message(t_id, message.chat.id, message.reply_to_message.message_id)
             sent += 1
-        except: failed += 1
-    await message.reply(f"📢 <b>Broadcast Done!</b> Sent: {sent} | Failed: {failed}")
+        except: pass
+    await message.reply(f"📢 <b>Broadcast Done!</b> Sent to {sent} targets.")
 
 # ==================== 🏎️ MAIN LOGIC ====================
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    await save_user(message.from_user)
-    if message.chat.type in ["group", "supergroup"]: await save_group(message.chat)
-    
+    if users_col: 
+        await users_col.update_one({"user_id": message.from_user.id}, {"$set": {"name": message.from_user.first_name}}, upsert=True)
     b = InlineKeyboardBuilder()
-    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
-    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
+    b.row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
+    b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
     await message.answer_photo(photo=WELCOME_PIC, caption="<blockquote>🏎️ <b>RAJX BYPASS SYSTEM</b>\n\nWelcome! Send link to bypass.</blockquote>", reply_markup=b.as_markup())
 
 @dp.message(F.text.startswith("http"))
 async def handle_bypass(message: types.Message):
-    await save_user(message.from_user)
-    if message.chat.type in ["group", "supergroup"]: await save_group(message.chat)
-
     try: await message.react([ReactionTypeEmoji(emoji="👀")])
     except: pass
 
-    if not await check_fj(message.from_user.id):
+    is_verified = await check_fj(message.from_user.id)
+    
+    if not is_verified:
         b = InlineKeyboardBuilder()
-        b.row(InlineKeyboardButton(text="Join Channel 📢", url=CHANNEL_LINK))
-        b.row(InlineKeyboardButton(text="Join Group 💬", url=GROUP_LINK))
-        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify"))
+        b.row(InlineKeyboardButton(text="Join Channel 📢", url=CHANNEL_LINK, style="primary"))
+        b.row(InlineKeyboardButton(text="Join Group 💬", url=GROUP_LINK, style="primary"))
+        b.row(InlineKeyboardButton(text="Verify ✅", callback_data="verify", style="success")) # Green
+        b.row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
         return await message.reply("❗ <b>ACCESS DENIED! Join BOTH our channel and group.</b>", reply_markup=b.as_markup())
 
     if message.chat.type == "private" and message.from_user.id != OWNER_ID:
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK))
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="⚡ USE HERE ⚡", url=GROUP_LINK, style="primary"))
         return await message.reply("❌ <b>PRIVATE BYPASS DISABLED!</b>\n\nUse our official group.", reply_markup=b.as_markup())
 
     status = await message.reply("░░░░░░░░░░░░░  0%\n<blockquote><b>Initializing... ⚙️</b></blockquote>")
-    
-    stages = [("███░░░░░░░░░  30%", "Bypassing..."), ("████████░░░░  70%", "Decrypting..."), ("████████████  100%", "Success! ✅")]
+    stages = [
+        ("█░░░░░░░░░░░  10%", "Connecting..."), ("██░░░░░░░░░░  20%", "Bypassing Ads..."),
+        ("███░░░░░░░░░  30%", "Safety Check..."), ("████░░░░░░░░  40%", "Solving Captcha..."),
+        ("█████░░░░░░░  50%", "Extracting Data..."), ("██████░░░░░░  60%", "Bypassing Links..."),
+        ("████████░░░░  75%", "Decrypting URL..."), ("██████████░░  85%", "Finalizing Result..."),
+        ("████████████  95%", "Generating Link..."), ("████████████  100%", "Success! ✅")
+    ]
     for bar, text in stages:
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.1)
         try: await status.edit_text(f"{bar}\n<blockquote>{text}</blockquote>")
         except: pass
 
@@ -138,47 +122,47 @@ async def handle_bypass(message: types.Message):
         time_val = res_data.get("time_taken", "N/A")
         usage_val = res_data.get("usage_count", "N/A")
 
+        try: await message.react([ReactionTypeEmoji(emoji="💯")])
+        except: pass
+
         IST = pytz.timezone('Asia/Kolkata')
         time_now = datetime.datetime.now(IST).strftime("%I:%M %p | %d-%b")
 
+        # --- 🏎️ FULL ORIGINAL RESPONSE TEXT ---
         res_text = (
             "<blockquote>"
-            "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n"
-            f"👤 <b>User:</b> {message.from_user.first_name}\n"
-            f"🔗 <b>Original:</b>\n<code>{message.text.strip()[:30]}...</code>\n\n"
-            f"🚀 <b>Bypassed Link:</b>\n{link}\n\n"
-            f"⚡ <b>Time:</b> <code>{time_val}</code> | 📊 <b>Usage:</b> <code>{usage_val}</code>\n"
-            f"🕒 <b>Date:</b> <code>{time_now}</code>\n"
-            f"👑 <b>Owner:</b> {DEV_HANDLE}"
+            "🏎️ <b>BYPASS SUCCESSFUL!</b> ⚡\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>User:</b> {message.from_user.first_name}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔗 <b>Original:</b>\n<code>{message.text.strip()}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🚀 <b>Bypassed Link:</b>\n{link}\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"⚡ <b>Time Taken:</b> <code>{time_val}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📊 <b>Usage Count:</b> <code>{usage_val}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🕒 <b>Time:</b> <code>{time_now}</code>\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👑 <b>Owner:</b> {DEV_HANDLE}\n━━━━━━━━━━━━━━━━━━━━"
             "</blockquote>"
         )
         
-        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK))
+        b = InlineKeyboardBuilder().row(InlineKeyboardButton(text="‼️ BUY API ‼️", url=BUY_API_LINK, style="danger"))
         await status.edit_text(res_text, reply_markup=b.as_markup(), disable_web_page_preview=True)
-        try: await message.react([ReactionTypeEmoji(emoji="💯")])
-        except: pass
-    except Exception as e:
-        await status.edit_text(f"❌ <b>API ERROR!</b>\n<code>{str(e)[:50]}</code>")
+    except:
+        await status.edit_text("❌ <b>API ERROR!</b>")
 
 @dp.callback_query(F.data == "verify")
 async def verify(cb: types.CallbackQuery):
     if await check_fj(cb.from_user.id):
         await cb.answer("✅ Verified!", show_alert=True)
         await cb.message.delete()
-    else:
-        await cb.answer("❌ Join BOTH first!", show_alert=True)
+    else: await cb.answer("❌ Join BOTH channel and group first!", show_alert=True)
 
 # ==================== RUNNER ====================
 server = Flask(__name__)
-
 @server.route('/')
-def st(): return "Bot is Running"
+def st(): return "Online"
 
 async def main():
     await init_db()
     await bot.delete_webhook(drop_pending_updates=True)
-    Thread(target=lambda: server.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000))), daemon=True).start()
-    print("🚀 Bot Started!")
+    Thread(target=lambda: server.run(host="0.0.0.0", port=10000), daemon=True).start()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
