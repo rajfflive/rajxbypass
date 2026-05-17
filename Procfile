@@ -1,2 +1,1 @@
-worker: python app.py
-
+web: python bypass_api.py
