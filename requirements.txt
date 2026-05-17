@@ -1,7 +1,4 @@
-aiogram
-cloudscraper
 flask
-motor
-pytz
-dnspython
-aiohttp
+telethon
+aiofiles
+requests
