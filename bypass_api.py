@@ -27,11 +27,17 @@ asyncio.set_event_loop(loop)
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, loop=loop)
 
 user_credits = {}
-recent_requests = {}  # key: "api_key|link" -> timestamp
+recent_requests = {}
 
 def get_user(k):
     if k not in user_credits:
-        user_credits[k] = {'credits': 0, 'used': 0, 'bypassed': 0, 'expiry': None, 'created': datetime.now().isoformat()}
+        user_credits[k] = {
+            'credits': 0,
+            'used': 0,          # total attempts
+            'bypassed': 0,      # successful bypasses
+            'expiry': None,
+            'created': datetime.now().isoformat()
+        }
     return user_credits[k]
 
 def is_expired(k):
@@ -69,6 +75,11 @@ def extract_links_from_message(msg):
             dst = urls[-1]
     return src, dst
 
+def success_rate(used, bypassed):
+    if used == 0:
+        return 0.0
+    return round((bypassed / used) * 100, 2)
+
 @app.route('/')
 def home():
     return render_template_string(HOME_HTML)
@@ -77,30 +88,40 @@ def home():
 def health():
     return jsonify({'status': 'ok', 'developer': '@rajfflive'})
 
-@app.route('/bypass', methods=['POST'])
+@app.route('/bypass', methods=['GET', 'POST'])
 def bypass():
-    data = request.json or {}
-    link = data.get('link')
-    api_key = data.get('api_key')
+    if request.method == 'GET':
+        link = request.args.get('link')
+        api_key = request.args.get('api_key')
+    else:
+        data = request.json or {}
+        link = data.get('link')
+        api_key = data.get('api_key')
     
     if not api_key or not link:
         return jsonify({'status': False, 'error': 'Missing api_key or link', 'developer': '@rajfflive'})
     if not link.startswith(('http://', 'https://')):
         link = 'https://' + link
     
-    # Strong duplicate check: same (key, link) within 5 seconds
     req_key = f"{api_key}|{link}"
     now = time.time()
     if req_key in recent_requests and now - recent_requests[req_key] < 5:
-        print(f"[DUPLICATE] Ignored request from {api_key[:8]} for {link[:50]}")
-        return jsonify({'status': False, 'error': 'Duplicate request ignored. Please wait 5 seconds.', 'developer': '@rajfflive'})
+        return jsonify({'status': False, 'error': 'Duplicate request ignored. Wait 5s', 'developer': '@rajfflive'})
     recent_requests[req_key] = now
     if len(recent_requests) > 200:
         recent_requests.clear()
     
     ok, err = deduct_credit(api_key)
     if not ok:
-        return jsonify({'status': False, 'error': err, 'credits': get_user(api_key)['credits'], 'developer': '@rajfflive'})
+        u = get_user(api_key)
+        return jsonify({
+            'status': False,
+            'error': err,
+            'credits': u['credits'],
+            'total_bypassed': u['bypassed'],
+            'success_rate': success_rate(u['used'], u['bypassed']),
+            'developer': '@rajfflive'
+        })
     
     async def send_and_poll():
         await client.send_message(BOT_USERNAME, link)
@@ -129,18 +150,34 @@ def bypass():
                 'original_link': result['src'],
                 'bypassed_link': result['dst'],
                 'credits_remaining': u['credits'],
+                'total_bypassed': u['bypassed'],
+                'success_rate': success_rate(u['used'], u['bypassed']),
                 'developer': '@rajfflive'
             })
         else:
             u = get_user(api_key)
             u['credits'] += 1
             u['used'] -= 1
-            return jsonify({'status': False, 'error': 'Bot did not respond in time', 'developer': '@rajfflive'})
+            return jsonify({
+                'status': False,
+                'error': 'Bot timeout',
+                'credits_remaining': u['credits'],
+                'total_bypassed': u['bypassed'],
+                'success_rate': success_rate(u['used'], u['bypassed']),
+                'developer': '@rajfflive'
+            })
     except Exception as e:
         u = get_user(api_key)
         u['credits'] += 1
         u['used'] -= 1
-        return jsonify({'status': False, 'error': str(e), 'developer': '@rajfflive'})
+        return jsonify({
+            'status': False,
+            'error': str(e),
+            'credits_remaining': u['credits'],
+            'total_bypassed': u['bypassed'],
+            'success_rate': success_rate(u['used'], u['bypassed']),
+            'developer': '@rajfflive'
+        })
 
 @app.route('/credits')
 def credits():
@@ -153,18 +190,41 @@ def credits():
         'credits_remaining': u['credits'],
         'total_used': u['used'],
         'total_bypassed': u['bypassed'],
+        'success_rate': success_rate(u['used'], u['bypassed']),
         'expiry': u['expiry'],
         'developer': '@rajfflive'
     })
 
-# ---------- Admin ----------
+@app.route('/admin/stats')
+def admin_stats():
+    total_keys = len(user_credits)
+    total_bypassed = sum(u['bypassed'] for u in user_credits.values())
+    total_used = sum(u['used'] for u in user_credits.values())
+    overall_success = success_rate(total_used, total_bypassed)
+    return jsonify({
+        'total_keys': total_keys,
+        'total_bypassed': total_bypassed,
+        'total_used': total_used,
+        'overall_success_rate': overall_success,
+        'developer': '@rajfflive'
+    })
+
+# ---------- Admin Routes ----------
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST' and request.form.get('secret') == ADMIN_SECRET:
         session['admin_logged_in'] = True
         return redirect('/admin')
     if session.get('admin_logged_in'):
-        return render_template_string(ADMIN_HTML, keys=user_credits)
+        # Compute global stats
+        total_keys = len(user_credits)
+        total_bypassed = sum(u['bypassed'] for u in user_credits.values())
+        total_used = sum(u['used'] for u in user_credits.values())
+        overall_success = success_rate(total_used, total_bypassed)
+        return render_template_string(ADMIN_HTML, keys=user_credits, 
+                                      total_keys=total_keys, 
+                                      total_bypassed=total_bypassed,
+                                      overall_success=overall_success)
     return render_template_string(LOGIN_HTML)
 
 @app.route('/admin/logout')
@@ -210,7 +270,7 @@ def admin_delete_key():
         return jsonify({'status': True})
     return jsonify({'status': False, 'error': 'Key not found'})
 
-# ---------- HTML (KD hata diya, ab sirf Raj Bypass) ----------
+# ---------- HTML Templates (with stats) ----------
 HOME_HTML = '''
 <!DOCTYPE html>
 <html>
@@ -221,11 +281,12 @@ HOME_HTML = '''
     <style>
         *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
         body{background:linear-gradient(135deg,#0a0f1e 0%,#0a192f 100%);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px}
-        .glass{background:rgba(15,25,45,0.7);backdrop-filter:blur(12px);border-radius:32px;padding:32px;max-width:500px;width:100%;border:1px solid rgba(0,255,136,0.2)}
+        .glass{background:rgba(15,25,45,0.7);backdrop-filter:blur(12px);border-radius:32px;padding:32px;max-width:550px;width:100%;border:1px solid rgba(0,255,136,0.2)}
         h1{font-size:1.8rem;background:linear-gradient(135deg,#00ff88,#00b4ff);-webkit-background-clip:text;background-clip:text;color:transparent}
         .badge{background:#00ff8810;border:1px solid #00ff88;border-radius:40px;padding:6px 14px;font-size:0.8rem;color:#00ff88;display:inline-block;margin:15px 0}
         .credit-box{background:#0a0f1e;border-radius:20px;padding:16px;margin:20px 0;text-align:center;border:1px solid #2a3a5a}
         .credit-number{font-size:2rem;font-weight:bold;color:#00ff88}
+        .stats-row{display:flex;justify-content:space-between;margin-top:10px;font-size:0.85rem}
         input,button{width:100%;padding:14px;margin:8px 0;border-radius:16px;border:none;font-size:1rem}
         input{background:#0a0f1e;border:1px solid #2a3a5a;color:white;outline:none}
         input:focus{border-color:#00ff88}
@@ -244,6 +305,10 @@ HOME_HTML = '''
         <div>YOUR CREDITS</div>
         <div class="credit-number" id="creditCount">—</div>
         <div id="expiryText"></div>
+        <div class="stats-row">
+            <span>✅ Total Bypassed: <span id="totalBypassed">0</span></span>
+            <span>📊 Success Rate: <span id="successRate">0</span>%</span>
+        </div>
     </div>
     <input type="text" id="apiKeyInput" placeholder="Your API Key">
     <button onclick="generateKey()">✨ Generate New Key</button>
@@ -273,6 +338,8 @@ HOME_HTML = '''
         if(data.status) {
             document.getElementById('creditCount').innerText = data.credits_remaining;
             document.getElementById('expiryText').innerText = data.expiry ? `Expires: ${new Date(data.expiry).toLocaleDateString()}` : '';
+            document.getElementById('totalBypassed').innerText = data.total_bypassed;
+            document.getElementById('successRate').innerText = data.success_rate;
         } else {
             document.getElementById('creditCount').innerText = 'Error';
         }
@@ -299,9 +366,9 @@ HOME_HTML = '''
             });
             let data = await res.json();
             if(data.status) {
-                resultDiv.innerHTML = `✅ <strong>Bypassed:</strong><br><a href="${data.bypassed_link}" target="_blank" class="link">${data.bypassed_link}</a><br>💎 Credits left: ${data.credits_remaining}`;
+                resultDiv.innerHTML = `✅ <strong>Bypassed:</strong><br><a href="${data.bypassed_link}" target="_blank" class="link">${data.bypassed_link}</a><br>💎 Credits left: ${data.credits_remaining}<br>✅ Total bypassed: ${data.total_bypassed}<br>📊 Success rate: ${data.success_rate}%`;
             } else {
-                resultDiv.innerHTML = `❌ ${data.error}`;
+                resultDiv.innerHTML = `❌ ${data.error}<br>💎 Credits: ${data.credits_remaining}<br>✅ Total bypassed: ${data.total_bypassed}<br>📊 Success rate: ${data.success_rate}%`;
             }
             await checkCredits();
         } catch(e) {
@@ -349,6 +416,9 @@ body{background:#0a0f1e;color:#fff;font-family:'Segoe UI',system-ui;padding:20px
 input,select,button{padding:10px;border-radius:12px;border:none}
 input,select{background:#0a0f1e;color:#fff;border:1px solid #2a3a5a}
 button{background:#00ff88;font-weight:bold;cursor:pointer}
+.stats-grid{display:flex;gap:20px;margin-bottom:20px;flex-wrap:wrap}
+.stat-card{background:#0a0f1e;padding:15px;border-radius:16px;flex:1;min-width:150px;text-align:center;border:1px solid #2a3a5a}
+.stat-number{font-size:2rem;font-weight:bold;color:#00ff88}
 table{width:100%;border-collapse:collapse}
 th,td{padding:12px;text-align:left;border-bottom:1px solid #2a3a5a}
 .copy-btn{background:#2a3a5a;padding:4px 12px;border-radius:20px;margin-left:8px}
@@ -360,6 +430,12 @@ a{color:#00b4ff}
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap">
         <h1>🔐 Admin Panel <span style="background:#00ff8822;color:#00ff88;padding:2px 10px;border-radius:20px;font-size:12px">@rajfflive</span></h1>
         <a href="/admin/logout" style="color:#ff8866">🚪 Logout</a>
+    </div>
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div>
+        <div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div>
+        <div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div>
     </div>
     <div class="card">
         <h3>➕ Generate API Key</h3>
@@ -383,13 +459,14 @@ a{color:#00b4ff}
     </div>
     <div class="card">
         <h3>📋 All Keys <button onclick="location.reload()" style="background:#2a3a5a;padding:4px 12px">⟳ Refresh</button></h3>
-        <div style="overflow-x:auto"><table><th>Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Expiry</th><th>Action</th></tr>
+        <div style="overflow-x:auto"><table><th>Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>
             {% for k,d in keys.items() %}
             <tr>
                 <td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></td>
                 <td>{{ d.credits }}</td>
                 <td>{{ d.used }}</td>
                 <td>{{ d.bypassed }}</td>
+                <td>{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</td>
                 <td>{{ d.expiry[:10] if d.expiry else 'Never' }}</td>
                 <td><button onclick="deleteKey('{{ k }}')" style="background:#ff4466">Delete</button></td>
             </tr>
