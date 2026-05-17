@@ -8,18 +8,22 @@ import re
 import os
 from datetime import datetime
 
-API_ID = int(os.environ.get('API_ID'))
-API_HASH = os.environ.get('API_HASH')
+API_ID = int(os.environ.get('API_ID', 0))
+API_HASH = os.environ.get('API_HASH', '')
 BOT_USERNAME = '@link_bypass_kd_bot'
 ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'SuperSecret@123')
 DEFAULT_CREDITS = 0
-SESSION_STRING = os.environ.get('SESSION_STRING')  # Ye aapki di hui string
+SESSION_STRING = os.environ.get('SESSION_STRING', '')
+
+if not API_ID or not API_HASH:
+    raise ValueError("API_ID and API_HASH must be set")
+if not SESSION_STRING:
+    raise ValueError("SESSION_STRING environment variable not set")
 
 app = Flask(__name__)
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-# Ye line important hai - StringSession use kar rahe hai
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, loop=loop)
 
 user_credits = {}
@@ -52,9 +56,11 @@ def extract_links_from_response(msg):
 @client.on(events.NewMessage(chats=BOT_USERNAME))
 async def handler(event):
     text = event.message.text
-    if 'Destination' not in text: return
+    if 'Destination' not in text:
+        return
     orig, bypass = extract_links_from_response(text)
-    if not bypass: return
+    if not bypass:
+        return
     for rid, req in list(pending_requests.items()):
         if req['original_link'] in text or (orig and orig == req['original_link']):
             pending_requests[rid]['result'] = {'original_link': orig or req['original_link'], 'bypassed_link': bypass}
@@ -99,28 +105,33 @@ def bypass():
         u = get_user(api_key)
         u['credits'] += 1
         u['total_used'] -= 1
-        if req_id in pending_requests: del pending_requests[req_id]
+        if req_id in pending_requests:
+            del pending_requests[req_id]
         return jsonify({'status': False, 'error': 'Bot timeout'})
     except Exception as e:
         u = get_user(api_key)
         u['credits'] += 1
         u['total_used'] -= 1
-        if req_id in pending_requests: del pending_requests[req_id]
+        if req_id in pending_requests:
+            del pending_requests[req_id]
         return jsonify({'status': False, 'error': str(e)})
 
 @app.route('/credits')
 def credits():
     api_key = request.args.get('api_key')
-    if not api_key: return jsonify({'status': False, 'error': 'Missing api_key'})
+    if not api_key:
+        return jsonify({'status': False, 'error': 'Missing api_key'})
     u = get_user(api_key)
     return jsonify({'status': True, 'credits_remaining': u['credits'], 'total_used': u['total_used'], 'total_bypassed': u['total_bypassed']})
 
 @app.route('/admin/add_credits', methods=['POST'])
 def admin_add():
     data = request.json or {}
-    if data.get('admin_key') != ADMIN_SECRET: return jsonify({'status': False, 'error': 'Invalid admin key'})
+    if data.get('admin_key') != ADMIN_SECRET:
+        return jsonify({'status': False, 'error': 'Invalid admin key'})
     target = data.get('api_key'); amount = data.get('amount', 0)
-    if not target or not isinstance(amount, int) or amount <= 0: return jsonify({'status': False, 'error': 'Invalid api_key or amount'})
+    if not target or not isinstance(amount, int) or amount <= 0:
+        return jsonify({'status': False, 'error': 'Invalid api_key or amount'})
     new_bal = add_credits(target, amount)
     return jsonify({'status': True, 'new_balance': new_bal})
 
@@ -134,15 +145,19 @@ HTML_UI = '''<!DOCTYPE html>
 
 def start_telegram():
     async def start():
-        await client.start()
-        print("🔥 Bot API started. Bot:", BOT_USERNAME)
+        await client.connect()
+        if not await client.is_user_authorized():
+            raise Exception("Invalid session string. Please generate a new one using Telethon StringSession.")
+        print("✅ Telegram client authorized successfully.")
         await client.send_message(BOT_USERNAME, '/start')
         await client.run_until_disconnected()
     loop.run_until_complete(start())
 
 def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5010)), debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)), debug=False, use_reloader=False)
 
 if __name__ == '__main__':
-    threading.Thread(target=run_flask, daemon=True).start()
+    # Start Flask in daemon thread, then start Telegram
+    t = threading.Thread(target=run_flask, daemon=True)
+    t.start()
     start_telegram()
