@@ -9,13 +9,13 @@ import os
 import secrets
 from datetime import datetime, timedelta
 
-# ==================== CONFIGURATION (Change these or use env vars) ====================
+# ==================== CONFIG ====================
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 BOT_USERNAMES = os.environ.get('BOT_USERNAMES', '@Nick_Bypass_Bot,@link_bypass_kd_bot')
 BOT_LIST = [bot.strip() for bot in BOT_USERNAMES.split(',')]
-ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'rajfflive')    # Admin username
-ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'mysecret123')  # Admin password
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'rajfflive')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'mysecret123')
 SESSION_STRING = os.environ.get('SESSION_STRING', '')
 PORT = int(os.environ.get('PORT', 10000))
 
@@ -93,10 +93,13 @@ def bypass():
         data = request.json or {}
         link = data.get('link')
         api_key = data.get('api_key')
+    
     if not api_key or not link:
         return jsonify({'status': False, 'error': 'Missing api_key or link', 'developer': '@rajfflive'})
     if not link.startswith(('http://','https://')):
         link = 'https://' + link
+    
+    # Duplicate check
     req_key = f"{api_key}|{link}"
     now = time.time()
     if req_key in recent_requests and now - recent_requests[req_key] < 5:
@@ -104,10 +107,14 @@ def bypass():
     recent_requests[req_key] = now
     if len(recent_requests) > 200:
         recent_requests.clear()
+    
+    # Deduct credit once
     ok, err = deduct_credit(api_key)
     if not ok:
         u = get_user(api_key)
         return jsonify({'status': False, 'error': err, 'credits': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
+    
+    # Async function to try a single bot
     async def try_bot(bot):
         await client.send_message(bot, link)
         for _ in range(20):
@@ -124,21 +131,40 @@ def bypass():
                     if urls:
                         return {'src': link, 'dst': urls[-1], 'bot': bot}
         return None
+    
     try:
-        result = None
-        for bot in BOT_LIST:
-            result = asyncio.run_coroutine_threadsafe(try_bot(bot), loop).result(timeout=22)
+        # Run all bots concurrently
+        tasks = [asyncio.run_coroutine_threadsafe(try_bot(bot), loop) for bot in BOT_LIST]
+        # Wait for first completed task
+        done, pending = asyncio.wait(
+            [asyncio.wrap_future(task) for task in tasks],
+            return_when=asyncio.FIRST_COMPLETED,
+            timeout=25
+        )
+        # Cancel remaining tasks
+        for future in pending:
+            future.cancel()
+        # Check result
+        for future in done:
+            result = future.result()
             if result:
-                break
-        if result:
-            u = get_user(api_key)
-            u['bypassed'] += 1
-            return jsonify({'status': True, 'original_link': result['src'], 'bypassed_link': result['dst'], 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
-        else:
-            u = get_user(api_key)
-            u['credits'] += 1
-            u['used'] -= 1
-            return jsonify({'status': False, 'error': 'All bots failed', 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
+                u = get_user(api_key)
+                u['bypassed'] += 1
+                return jsonify({
+                    'status': True,
+                    'original_link': result['src'],
+                    'bypassed_link': result['dst'],
+                    'credits_remaining': u['credits'],
+                    'total_bypassed': u['bypassed'],
+                    'success_rate': success_rate(u['used'], u['bypassed']),
+                    'used_bot': result['bot'],   # tells which bot succeeded
+                    'developer': '@rajfflive'
+                })
+        # No bot responded
+        u = get_user(api_key)
+        u['credits'] += 1
+        u['used'] -= 1
+        return jsonify({'status': False, 'error': 'All bots failed', 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
     except Exception as e:
         u = get_user(api_key)
         u['credits'] += 1
@@ -151,9 +177,17 @@ def credits():
     if not api_key:
         return jsonify({'status': False, 'error': 'Missing api_key', 'developer': '@rajfflive'})
     u = get_user(api_key)
-    return jsonify({'status': True, 'credits_remaining': u['credits'], 'total_used': u['used'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'expiry': u['expiry'], 'developer': '@rajfflive'})
+    return jsonify({
+        'status': True,
+        'credits_remaining': u['credits'],
+        'total_used': u['used'],
+        'total_bypassed': u['bypassed'],
+        'success_rate': success_rate(u['used'], u['bypassed']),
+        'expiry': u['expiry'],
+        'developer': '@rajfflive'
+    })
 
-# ------------------- Admin Panel (Username + Password) -------------------
+# ==================== ADMIN PANEL ====================
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST':
@@ -224,7 +258,7 @@ HOME_HTML = '''<!DOCTYPE html>
 let apiKey=localStorage.getItem('api_key')||''; document.getElementById('apiKeyInput').value=apiKey; if(apiKey)checkCredits();
 async function generateKey(){ let k='user_'+Math.random().toString(36).substr(2,12); localStorage.setItem('api_key',k); document.getElementById('apiKeyInput').value=k; await checkCredits(); }
 async function checkCredits(){ let k=document.getElementById('apiKeyInput').value; if(!k)return; let r=await fetch(`/credits?api_key=${k}`); let d=await r.json(); if(d.status){ document.getElementById('creditCount').innerText=d.credits_remaining; document.getElementById('expiryText').innerText=d.expiry?`Expires: ${new Date(d.expiry).toLocaleDateString()}`:''; document.getElementById('totalBypassed').innerText=d.total_bypassed; document.getElementById('successRate').innerText=d.success_rate; }else document.getElementById('creditCount').innerText='Error'; }
-async function bypass(){ let k=document.getElementById('apiKeyInput').value; let link=document.getElementById('linkInput').value; let resultDiv=document.getElementById('result'); let btn=document.getElementById('bypassBtn'); if(!k||!link){ resultDiv.style.display='block'; resultDiv.innerHTML='❌ API key and link required'; return; } btn.disabled=true; btn.innerText='⏳ Processing...'; resultDiv.style.display='block'; resultDiv.innerHTML='⏳ Processing...'; try{ let r=await fetch('/bypass',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link,api_key:k})}); let d=await r.json(); if(d.status){ resultDiv.innerHTML=`✅ <strong>Bypassed:</strong><br><a href="${d.bypassed_link}" target="_blank">${d.bypassed_link}</a><br>💎 Credits left: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; }else{ resultDiv.innerHTML=`❌ ${d.error}<br>💎 Credits: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; } await checkCredits(); }catch(e){ resultDiv.innerHTML='❌ Network error'; }finally{ btn.disabled=false; btn.innerText='🚀 Bypass Now'; } }
+async function bypass(){ let k=document.getElementById('apiKeyInput').value; let link=document.getElementById('linkInput').value; let resultDiv=document.getElementById('result'); let btn=document.getElementById('bypassBtn'); if(!k||!link){ resultDiv.style.display='block'; resultDiv.innerHTML='❌ API key and link required'; return; } btn.disabled=true; btn.innerText='⏳ Processing...'; resultDiv.style.display='block'; resultDiv.innerHTML='⏳ Processing...'; try{ let r=await fetch('/bypass',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link,api_key:k})}); let d=await r.json(); if(d.status){ resultDiv.innerHTML=`✅ <strong>Bypassed via ${d.used_bot}</strong><br><a href="${d.bypassed_link}" target="_blank">${d.bypassed_link}</a><br>💎 Credits left: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; }else{ resultDiv.innerHTML=`❌ ${d.error}<br>💎 Credits: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; } await checkCredits(); }catch(e){ resultDiv.innerHTML='❌ Network error'; }finally{ btn.disabled=false; btn.innerText='🚀 Bypass Now'; } }
 document.getElementById('apiKeyInput').addEventListener('change',()=>{ localStorage.setItem('api_key',document.getElementById('apiKeyInput').value); checkCredits(); });
 </script></body></html>'''
 
