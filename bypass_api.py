@@ -9,6 +9,7 @@ import os
 import secrets
 from datetime import datetime, timedelta
 
+# ========== ENV ==========
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 BOT_USERNAMES = os.environ.get('BOT_USERNAMES', '@Nick_Bypass_Bot,@link_bypass_kd_bot')
@@ -26,7 +27,6 @@ app.secret_key = secrets.token_hex(16)
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
-
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, loop=loop)
 
 user_credits = {}
@@ -80,6 +80,7 @@ def run_async(coro):
     future = asyncio.run_coroutine_threadsafe(coro, loop)
     return future.result(timeout=30)
 
+# ------------------- HOME -------------------
 @app.route('/')
 def home():
     return render_template_string(HOME_HTML)
@@ -88,6 +89,7 @@ def home():
 def health():
     return jsonify({'status': 'ok', 'developer': '@rajfflive'})
 
+# ------------------- BYPASS -------------------
 @app.route('/bypass', methods=['GET', 'POST'])
 def bypass():
     if request.method == 'GET':
@@ -101,15 +103,12 @@ def bypass():
     if not api_key or not link:
         return jsonify({'status': False, 'error': 'Missing api_key or link', 'developer': '@rajfflive'})
     
-    # Clean and validate link
     link = link.strip()
     if not link.startswith(('http://', 'https://')):
         link = 'https://' + link
     
-    # Log to console (Render logs)
     print(f"[BYPASS] Received link: {link}")
     
-    # Duplicate check
     req_key = f"{api_key}|{link}"
     now = time.time()
     if req_key in recent_requests and now - recent_requests[req_key] < 5:
@@ -124,7 +123,6 @@ def bypass():
         return jsonify({'status': False, 'error': err, 'credits': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
     
     async def try_one_bot(bot):
-        # Ensure link is sent as raw text, no extra whitespace
         await client.send_message(bot, link)
         print(f"[TRY] Sent to {bot}: {link}")
         for _ in range(20):
@@ -175,7 +173,7 @@ def bypass():
             u = get_user(api_key)
             u['credits'] += 1
             u['used'] -= 1
-            return jsonify({'status': False, 'error': 'All bots failed to respond (link might be invalid)', 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
+            return jsonify({'status': False, 'error': 'All bots failed', 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
     except Exception as e:
         u = get_user(api_key)
         u['credits'] += 1
@@ -198,7 +196,7 @@ def credits():
         'developer': '@rajfflive'
     })
 
-# ------------------- Admin Panel (unchanged but included for completeness) -------------------
+# ------------------- ADMIN -------------------
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST':
@@ -260,13 +258,64 @@ def admin_delete_key():
         return jsonify({'status': True})
     return jsonify({'status': False, 'error': 'Key not found'})
 
-# ==================== HTML TEMPLATES (same as before, omitted for brevity) ====================
-# I'll include them as they are long, but to save space I'll put a placeholder.
-# In your actual code, keep your existing HOME_HTML, LOGIN_HTML, ADMIN_HTML.
-# For the sake of completeness, I assume you already have them.
+# ==================== HTML TEMPLATES ====================
+HOME_HTML = '''<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Raj Bypass API</title>
+<style>*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui}body{background:linear-gradient(135deg,#0a0f1e,#0a192f);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px}.glass{background:rgba(15,25,45,0.7);backdrop-filter:blur(12px);border-radius:32px;padding:32px;max-width:550px;width:100%;border:1px solid rgba(0,255,136,0.2)}h1{font-size:1.8rem;background:linear-gradient(135deg,#00ff88,#00b4ff);-webkit-background-clip:text;background-clip:text;color:transparent}.badge{background:#00ff8810;border:1px solid #00ff88;border-radius:40px;padding:6px 14px;font-size:0.8rem;color:#00ff88;display:inline-block;margin:15px 0}.credit-box{background:#0a0f1e;border-radius:20px;padding:16px;margin:20px 0;text-align:center;border:1px solid #2a3a5a}.credit-number{font-size:2rem;font-weight:bold;color:#00ff88}.stats-row{display:flex;justify-content:space-between;margin-top:10px;font-size:0.85rem}input,button{width:100%;padding:14px;margin:8px 0;border-radius:16px;border:none;font-size:1rem}input{background:#0a0f1e;border:1px solid #2a3a5a;color:white}input:focus{border-color:#00ff88}button{background:linear-gradient(135deg,#00ff88,#00b4ff);color:#0a0f1e;font-weight:bold;cursor:pointer}button:disabled{opacity:0.6}.result{background:#0a0f1e;border-radius:16px;padding:12px;margin-top:16px;word-break:break-all;border-left:3px solid #00ff88}.footer{margin-top:24px;font-size:0.75rem;text-align:center;color:#5a6e8a}a{color:#00b4ff}</style></head>
+<body><div class="glass"><h1>🔗 Raj Bypass API</h1><div class="badge">⚡ by @rajfflive</div><div class="credit-box"><div>YOUR CREDITS</div><div class="credit-number" id="creditCount">—</div><div id="expiryText"></div><div class="stats-row"><span>✅ Total Bypassed: <span id="totalBypassed">0</span></span><span>📊 Success Rate: <span id="successRate">0</span>%</span></div></div><input type="text" id="apiKeyInput" placeholder="Your API Key"><button onclick="generateKey()">✨ Generate New Key</button><button onclick="checkCredits()" style="background:#2a3a5a;color:white">⟳ Check Credits</button><hr style="margin:20px 0;border-color:#2a3a5a"><input type="text" id="linkInput" placeholder="Paste link to bypass..."><button id="bypassBtn" onclick="bypass()">🚀 Bypass Now</button><div id="result" class="result" style="display:none"></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive" target="_blank">💬 Support</a> | <a href="/admin">Admin</a></div></div><script>
+let apiKey=localStorage.getItem('api_key')||''; document.getElementById('apiKeyInput').value=apiKey; if(apiKey)checkCredits();
+async function generateKey(){ let k='user_'+Math.random().toString(36).substr(2,12); localStorage.setItem('api_key',k); document.getElementById('apiKeyInput').value=k; await checkCredits(); }
+async function checkCredits(){ let k=document.getElementById('apiKeyInput').value; if(!k)return; let r=await fetch(`/credits?api_key=${k}`); let d=await r.json(); if(d.status){ document.getElementById('creditCount').innerText=d.credits_remaining; document.getElementById('expiryText').innerText=d.expiry?`Expires: ${new Date(d.expiry).toLocaleDateString()}`:''; document.getElementById('totalBypassed').innerText=d.total_bypassed; document.getElementById('successRate').innerText=d.success_rate; }else document.getElementById('creditCount').innerText='Error'; }
+async function bypass(){ let k=document.getElementById('apiKeyInput').value; let link=document.getElementById('linkInput').value; let resultDiv=document.getElementById('result'); let btn=document.getElementById('bypassBtn'); if(!k||!link){ resultDiv.style.display='block'; resultDiv.innerHTML='❌ API key and link required'; return; } btn.disabled=true; btn.innerText='⏳ Processing...'; resultDiv.style.display='block'; resultDiv.innerHTML='⏳ Processing...'; try{ let r=await fetch('/bypass',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link,api_key:k})}); let d=await r.json(); if(d.status){ resultDiv.innerHTML=`✅ <strong>Bypassed via ${d.used_bot}</strong><br><a href="${d.bypassed_link}" target="_blank">${d.bypassed_link}</a><br>💎 Credits left: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; }else{ resultDiv.innerHTML=`❌ ${d.error}<br>💎 Credits: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; } await checkCredits(); }catch(e){ resultDiv.innerHTML='❌ Network error'; }finally{ btn.disabled=false; btn.innerText='🚀 Bypass Now'; } }
+document.getElementById('apiKeyInput').addEventListener('change',()=>{ localStorage.setItem('api_key',document.getElementById('apiKeyInput').value); checkCredits(); });
+</script></body></html>'''
 
-# ----------------------------------------------------------------------
-# START TELEGRAM
+LOGIN_HTML = '''<!DOCTYPE html>
+<html><head><title>Admin Login</title><style>
+body{background:#0a0f1e;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:sans-serif}
+.login-card{background:rgba(17,34,53,0.95);backdrop-filter:blur(10px);padding:40px;border-radius:32px;width:360px;text-align:center;border:1px solid #00ff8844}
+input,button{width:100%;padding:12px;margin:8px 0;border-radius:24px;border:none}
+input{background:#0a0f1e;color:#fff;border:1px solid #2a3a5a}
+button{background:#00ff88;font-weight:bold;cursor:pointer}
+.error{color:#ff8866;margin-bottom:10px}
+.footer{margin-top:20px;font-size:12px;color:#5a6e8a}
+a{color:#00b4ff}
+</style></head>
+<body><div class="login-card"><h2>🔐 Admin Login</h2>{% if error %}<div class="error">{{ error }}</div>{% endif %}<form method="post"><input type="text" name="username" placeholder="Username" required><input type="password" name="password" placeholder="Password" required><button>Login</button></form><div class="footer">Developer: @rajfflive | <a href="https://t.me/rajfflive">Support</a></div></div></body></html>'''
+
+ADMIN_HTML = '''<!DOCTYPE html>
+<html><head><title>Admin Dashboard</title><meta name="viewport" content="width=device-width"><style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Inter',sans-serif}
+body{background:url('https://i.ibb.co/n8jX6HmQ/a4671110f8cc.jpg') no-repeat center center fixed;background-size:cover;backdrop-filter:blur(10px);padding:20px}
+.overlay{background:rgba(10,15,30,0.75);border-radius:32px;padding:20px;min-height:100vh}
+.dashboard{max-width:1400px;margin:auto}
+.stats-grid{display:flex;gap:20px;margin-bottom:20px;flex-wrap:wrap}
+.stat-card{background:rgba(17,34,53,0.95);backdrop-filter:blur(10px);padding:20px;border-radius:24px;flex:1;min-width:180px;text-align:center;border:1px solid rgba(0,255,136,0.3);transition:transform 0.2s}
+.stat-card:hover{transform:translateY(-5px)}
+.stat-number{font-size:2.5rem;font-weight:bold;color:#00ff88}
+.card{background:rgba(17,34,53,0.95);backdrop-filter:blur(10px);border-radius:24px;padding:24px;margin-bottom:24px;border:1px solid rgba(0,255,136,0.2)}
+.row{display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px}
+input,select,button{padding:12px;border-radius:12px;border:none;font-size:14px}
+input,select{background:#0a0f1e;color:#fff;border:1px solid #2a3a5a}
+button{background:linear-gradient(135deg,#00ff88,#00b4ff);color:#0a0f1e;font-weight:bold;cursor:pointer;transition:all 0.2s}
+button:hover{transform:scale(1.02)}
+table{width:100%;border-collapse:collapse}
+th,td{padding:12px;text-align:left;border-bottom:1px solid #2a3a5a}
+.copy-btn{background:#2a3a5a;padding:4px 12px;border-radius:20px;margin-left:8px;color:#fff;cursor:pointer}
+.footer{margin-top:30px;text-align:center;font-size:12px;color:#5a6e8a}
+a{color:#00b4ff}
+.badge{background:#00ff8822;color:#00ff88;padding:2px 10px;border-radius:20px;font-size:12px}
+</style></head>
+<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:#2a3a5a;padding:8px 16px;margin-left:10px">⟳ Refresh</button></h3><div style="overflow-x:auto;margin-top:15px"><table><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></div><div class="stat-number">{{ d.credits }}</div><div class="stat-number">{{ d.used }}</div><div class="stat-number">{{ d.bypassed }}</div><div class="stat-number">{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</div><div class="stat-number">{{ d.expiry[:10] if d.expiry else 'Never' }}</div><div class="stat-number"><button onclick="deleteKey('{{ k }}')" style="background:#ff4466;padding:6px 12px">Delete</button></div></tr>{% endfor %}</table></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>
+function copyKey(key,idx){ navigator.clipboard.writeText(key); alert('Copied: '+key); }
+async function deleteKey(key){ if(confirm('Delete this key?')){ let fd=new FormData(); fd.append('api_key',key); let r=await fetch('/admin/delete_key',{method:'POST',body:fd}); if(r.ok) location.reload(); else alert('Failed'); } }
+document.getElementById('genForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/generate',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('genResult').innerHTML=`✅ Generated: ${d.api_key}<br>Credits: ${d.credits}<br>Expiry: ${d.expiry_days||'None'}<br><button onclick="navigator.clipboard.writeText('${d.api_key}')">📋 Copy Key</button>`; setTimeout(()=>location.reload(),1500); } else document.getElementById('genResult').innerHTML=`❌ ${d.error}`; };
+document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/add_credits',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('addResult').innerHTML=`✅ Added! New balance: ${d.new_balance}`; setTimeout(()=>location.reload(),1000); } else document.getElementById('addResult').innerHTML=`❌ ${d.error}`; };
+</script></body></html>'''
+
+# ------------------- START -------------------
 def start_telegram():
     async def main():
         await client.connect()
