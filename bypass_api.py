@@ -9,7 +9,6 @@ import os
 import secrets
 from datetime import datetime, timedelta
 
-# ==================== CONFIG ====================
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 BOT_USERNAMES = os.environ.get('BOT_USERNAMES', '@Nick_Bypass_Bot,@link_bypass_kd_bot')
@@ -25,8 +24,10 @@ if not API_ID or not API_HASH or not SESSION_STRING:
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
 
+# Global event loop (single, reused)
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
+
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, loop=loop)
 
 user_credits = {}
@@ -76,6 +77,12 @@ def extract_links_from_message(msg):
 def success_rate(used, bypassed):
     return 0.0 if used == 0 else round((bypassed / used) * 100, 2)
 
+def run_async(coro):
+    """Run async coroutine in the global event loop and return result."""
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result(timeout=30)
+
+# ------------------------------------------------------------
 @app.route('/')
 def home():
     return render_template_string(HOME_HTML)
@@ -114,57 +121,62 @@ def bypass():
         u = get_user(api_key)
         return jsonify({'status': False, 'error': err, 'credits': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
     
-    # Async function to try a single bot
-    async def try_bot(bot):
-        await client.send_message(bot, link)
-        for _ in range(20):
-            await asyncio.sleep(1)
-            msgs = await client.get_messages(bot, limit=5)
-            for msg in msgs:
-                if msg.text and ('Bypassed Link' in msg.text or 'Destination' in msg.text):
-                    src, dst = extract_links_from_message(msg.text)
-                    if dst:
-                        return {'src': src or link, 'dst': dst, 'bot': bot}
-            for msg in msgs:
-                if msg.text and 't.me' in msg.text:
-                    urls = re.findall(r'https?://[^\s\n]+', msg.text)
-                    if urls:
-                        return {'src': link, 'dst': urls[-1], 'bot': bot}
+    # Async function that tries all bots concurrently and returns first successful result
+    async def try_all_bots():
+        async def try_one_bot(bot):
+            await client.send_message(bot, link)
+            # Poll for up to 20 seconds
+            for _ in range(20):
+                await asyncio.sleep(1)
+                msgs = await client.get_messages(bot, limit=5)
+                for msg in msgs:
+                    if msg.text and ('Bypassed Link' in msg.text or 'Destination' in msg.text):
+                        src, dst = extract_links_from_message(msg.text)
+                        if dst:
+                            return {'src': src or link, 'dst': dst, 'bot': bot}
+                for msg in msgs:
+                    if msg.text and 't.me' in msg.text:
+                        urls = re.findall(r'https?://[^\s\n]+', msg.text)
+                        if urls:
+                            return {'src': link, 'dst': urls[-1], 'bot': bot}
+            return None
+        
+        # Create tasks for all bots
+        tasks = [asyncio.create_task(try_one_bot(bot)) for bot in BOT_LIST]
+        # Wait for first task to finish (success or failure)
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED, timeout=25)
+        # Cancel remaining tasks
+        for task in pending:
+            task.cancel()
+        # Check if any finished task has a result
+        for task in done:
+            result = task.result()
+            if result:
+                return result
         return None
     
     try:
-        # Run all bots concurrently
-        tasks = [asyncio.run_coroutine_threadsafe(try_bot(bot), loop) for bot in BOT_LIST]
-        # Wait for first completed task
-        done, pending = asyncio.wait(
-            [asyncio.wrap_future(task) for task in tasks],
-            return_when=asyncio.FIRST_COMPLETED,
-            timeout=25
-        )
-        # Cancel remaining tasks
-        for future in pending:
-            future.cancel()
-        # Check result
-        for future in done:
-            result = future.result()
-            if result:
-                u = get_user(api_key)
-                u['bypassed'] += 1
-                return jsonify({
-                    'status': True,
-                    'original_link': result['src'],
-                    'bypassed_link': result['dst'],
-                    'credits_remaining': u['credits'],
-                    'total_bypassed': u['bypassed'],
-                    'success_rate': success_rate(u['used'], u['bypassed']),
-                    'used_bot': result['bot'],   # tells which bot succeeded
-                    'developer': '@rajfflive'
-                })
-        # No bot responded
-        u = get_user(api_key)
-        u['credits'] += 1
-        u['used'] -= 1
-        return jsonify({'status': False, 'error': 'All bots failed', 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
+        # Run the concurrent function in the global event loop
+        result = run_async(try_all_bots())
+        if result:
+            u = get_user(api_key)
+            u['bypassed'] += 1
+            return jsonify({
+                'status': True,
+                'original_link': result['src'],
+                'bypassed_link': result['dst'],
+                'credits_remaining': u['credits'],
+                'total_bypassed': u['bypassed'],
+                'success_rate': success_rate(u['used'], u['bypassed']),
+                'used_bot': result['bot'],
+                'developer': '@rajfflive'
+            })
+        else:
+            # No bot succeeded -> refund credit
+            u = get_user(api_key)
+            u['credits'] += 1
+            u['used'] -= 1
+            return jsonify({'status': False, 'error': 'All bots failed', 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
     except Exception as e:
         u = get_user(api_key)
         u['credits'] += 1
@@ -187,7 +199,7 @@ def credits():
         'developer': '@rajfflive'
     })
 
-# ==================== ADMIN PANEL ====================
+# ------------------- Admin Panel -------------------
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST':
@@ -249,7 +261,7 @@ def admin_delete_key():
         return jsonify({'status': True})
     return jsonify({'status': False, 'error': 'Key not found'})
 
-# ==================== HTML TEMPLATES ====================
+# ==================== HTML TEMPLATES (unchanged) ====================
 HOME_HTML = '''<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Raj Bypass API</title>
@@ -299,13 +311,14 @@ th,td{padding:12px;text-align:left;border-bottom:1px solid #2a3a5a}
 a{color:#00b4ff}
 .badge{background:#00ff8822;color:#00ff88;padding:2px 10px;border-radius:20px;font-size:12px}
 </style></head>
-<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:#2a3a5a;padding:8px 16px;margin-left:10px">⟳ Refresh</button></h3><div style="overflow-x:auto;margin-top:15px"><table><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></td><td>{{ d.credits }}</td><td>{{ d.used }}</td><td>{{ d.bypassed }}</td><td>{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</td><td>{{ d.expiry[:10] if d.expiry else 'Never' }}</td><td><button onclick="deleteKey('{{ k }}')" style="background:#ff4466;padding:6px 12px">Delete</button></td></tr>{% endfor %}</table></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>
+<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:#2a3a5a;padding:8px 16px;margin-left:10px">⟳ Refresh</button></h3><div style="overflow-x:auto;margin-top:15px"><table><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></div><div class="stat-number">{{ d.credits }}</div><div class="stat-number">{{ d.used }}</div><div class="stat-number">{{ d.bypassed }}</div><div class="stat-number">{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</div><div class="stat-number">{{ d.expiry[:10] if d.expiry else 'Never' }}</div><div class="stat-number"><button onclick="deleteKey('{{ k }}')" style="background:#ff4466;padding:6px 12px">Delete</button></div></table>{% endfor %}</table></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>
 function copyKey(key,idx){ navigator.clipboard.writeText(key); alert('Copied: '+key); }
 async function deleteKey(key){ if(confirm('Delete this key?')){ let fd=new FormData(); fd.append('api_key',key); let r=await fetch('/admin/delete_key',{method:'POST',body:fd}); if(r.ok) location.reload(); else alert('Failed'); } }
 document.getElementById('genForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/generate',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('genResult').innerHTML=`✅ Generated: ${d.api_key}<br>Credits: ${d.credits}<br>Expiry: ${d.expiry_days||'None'}<br><button onclick="navigator.clipboard.writeText('${d.api_key}')">📋 Copy Key</button>`; setTimeout(()=>location.reload(),1500); } else document.getElementById('genResult').innerHTML=`❌ ${d.error}`; };
 document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/add_credits',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('addResult').innerHTML=`✅ Added! New balance: ${d.new_balance}`; setTimeout(()=>location.reload(),1000); } else document.getElementById('addResult').innerHTML=`❌ ${d.error}`; };
 </script></body></html>'''
 
+# ------------------- Start Telegram Client -------------------
 def start_telegram():
     async def main():
         await client.connect()
