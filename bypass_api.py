@@ -9,7 +9,6 @@ import os
 import secrets
 from datetime import datetime, timedelta
 
-# ========== ENV ==========
 API_ID = int(os.environ.get('API_ID', 0))
 API_HASH = os.environ.get('API_HASH', '')
 BOT_USERNAME = '@link_bypass_kd_bot'
@@ -18,7 +17,7 @@ SESSION_STRING = os.environ.get('SESSION_STRING', '')
 PORT = int(os.environ.get('PORT', 10000))
 
 if not API_ID or not API_HASH or not SESSION_STRING:
-    raise ValueError("Missing API_ID, API_HASH or SESSION_STRING")
+    raise ValueError("Missing env")
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
@@ -30,46 +29,38 @@ client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, loop=lo
 user_credits = {}
 recent_requests = {}  # key: "api_key|link" -> timestamp
 
-# ---------- Helper Functions ----------
-def get_user(api_key):
-    if api_key not in user_credits:
-        user_credits[api_key] = {
-            'credits': 0,
-            'used': 0,
-            'bypassed': 0,
-            'expiry': None,
-            'created': datetime.now().isoformat()
-        }
-    return user_credits[api_key]
+def get_user(k):
+    if k not in user_credits:
+        user_credits[k] = {'credits': 0, 'used': 0, 'bypassed': 0, 'expiry': None, 'created': datetime.now().isoformat()}
+    return user_credits[k]
 
-def is_expired(api_key):
-    exp = get_user(api_key).get('expiry')
+def is_expired(k):
+    exp = get_user(k).get('expiry')
     return exp and datetime.now() > datetime.fromisoformat(exp)
 
-def deduct_credit(api_key):
-    if is_expired(api_key):
+def deduct_credit(k):
+    if is_expired(k):
         return False, "Key expired"
-    u = get_user(api_key)
+    u = get_user(k)
     if u['credits'] >= 1:
         u['credits'] -= 1
         u['used'] += 1
         return True, None
     return False, f"Insufficient credits ({u['credits']} left)"
 
-def add_credits(api_key, amount, expiry_days=None):
-    u = get_user(api_key)
-    u['credits'] += amount
-    if expiry_days:
-        u['expiry'] = (datetime.now() + timedelta(days=expiry_days)).isoformat()
+def add_credits(k, amt, days=None):
+    u = get_user(k)
+    u['credits'] += amt
+    if days:
+        u['expiry'] = (datetime.now() + timedelta(days=days)).isoformat()
     return u['credits']
 
 def generate_api_key():
     return "key_" + secrets.token_hex(12)
 
-# ---------- Link Extraction ----------
 def extract_links_from_message(msg):
-    src_match = re.search(r'Source\s*:\s*(https?://[^\s\n]+)', msg, re.IGNORECASE)
-    dst_match = re.search(r'Destination\s*:\s*(https?://[^\s\n]+)', msg, re.IGNORECASE)
+    src_match = re.search(r'Source\s*:\s*(https?://[^\s\n]+)', msg, re.I)
+    dst_match = re.search(r'Destination\s*:\s*(https?://[^\s\n]+)', msg, re.I)
     src = src_match.group(1) if src_match else None
     dst = dst_match.group(1) if dst_match else None
     if not dst:
@@ -78,7 +69,6 @@ def extract_links_from_message(msg):
             dst = urls[-1]
     return src, dst
 
-# ---------- Flask Routes ----------
 @app.route('/')
 def home():
     return render_template_string(HOME_HTML)
@@ -87,7 +77,7 @@ def home():
 def health():
     return jsonify({'status': 'ok', 'developer': '@rajfflive'})
 
-@app.route('/bypass', methods=['POST'])  # Only POST, no GET
+@app.route('/bypass', methods=['POST'])
 def bypass():
     data = request.json or {}
     link = data.get('link')
@@ -98,22 +88,20 @@ def bypass():
     if not link.startswith(('http://', 'https://')):
         link = 'https://' + link
     
-    # ----- DUPLICATE CHECK (within 2 seconds) -----
+    # Strong duplicate check: same (key, link) within 5 seconds
     req_key = f"{api_key}|{link}"
     now = time.time()
-    if req_key in recent_requests and now - recent_requests[req_key] < 2:
-        return jsonify({'status': False, 'error': 'Duplicate request ignored. Please wait.', 'developer': '@rajfflive'})
+    if req_key in recent_requests and now - recent_requests[req_key] < 5:
+        print(f"[DUPLICATE] Ignored request from {api_key[:8]} for {link[:50]}")
+        return jsonify({'status': False, 'error': 'Duplicate request ignored. Please wait 5 seconds.', 'developer': '@rajfflive'})
     recent_requests[req_key] = now
-    # Clean old entries occasionally
-    if len(recent_requests) > 100:
+    if len(recent_requests) > 200:
         recent_requests.clear()
     
-    # Deduct credit
     ok, err = deduct_credit(api_key)
     if not ok:
         return jsonify({'status': False, 'error': err, 'credits': get_user(api_key)['credits'], 'developer': '@rajfflive'})
     
-    # Async polling
     async def send_and_poll():
         await client.send_message(BOT_USERNAME, link)
         for _ in range(20):
@@ -124,7 +112,6 @@ def bypass():
                     src, dst = extract_links_from_message(msg.text)
                     if dst:
                         return {'src': src or link, 'dst': dst}
-            # Fallback: look for t.me link
             for msg in msgs:
                 if msg.text and 't.me' in msg.text:
                     urls = re.findall(r'https?://[^\s\n]+', msg.text)
@@ -145,13 +132,11 @@ def bypass():
                 'developer': '@rajfflive'
             })
         else:
-            # refund credit on timeout
             u = get_user(api_key)
             u['credits'] += 1
             u['used'] -= 1
             return jsonify({'status': False, 'error': 'Bot did not respond in time', 'developer': '@rajfflive'})
     except Exception as e:
-        # refund credit on error
         u = get_user(api_key)
         u['credits'] += 1
         u['used'] -= 1
@@ -172,7 +157,7 @@ def credits():
         'developer': '@rajfflive'
     })
 
-# ---------- Admin Panel (with @rajfflive) ----------
+# ---------- Admin ----------
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST' and request.form.get('secret') == ADMIN_SECRET:
@@ -225,14 +210,14 @@ def admin_delete_key():
         return jsonify({'status': True})
     return jsonify({'status': False, 'error': 'Key not found'})
 
-# ---------- HTML Templates (button disable + developer credit) ----------
+# ---------- HTML (KD hata diya, ab sirf Raj Bypass) ----------
 HOME_HTML = '''
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KD Bypass API</title>
+    <title>Raj Bypass API</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
         body{background:linear-gradient(135deg,#0a0f1e 0%,#0a192f 100%);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px}
@@ -244,8 +229,7 @@ HOME_HTML = '''
         input,button{width:100%;padding:14px;margin:8px 0;border-radius:16px;border:none;font-size:1rem}
         input{background:#0a0f1e;border:1px solid #2a3a5a;color:white;outline:none}
         input:focus{border-color:#00ff88}
-        button{background:linear-gradient(135deg,#00ff88,#00b4ff);color:#0a0f1e;font-weight:bold;cursor:pointer;transition:0.1s}
-        button:active{transform:scale(0.98)}
+        button{background:linear-gradient(135deg,#00ff88,#00b4ff);color:#0a0f1e;font-weight:bold;cursor:pointer}
         button:disabled{opacity:0.6;cursor:not-allowed}
         .result{background:#0a0f1e;border-radius:16px;padding:12px;margin-top:16px;word-break:break-all;border-left:3px solid #00ff88}
         .footer{margin-top:24px;font-size:0.75rem;text-align:center;color:#5a6e8a}
@@ -254,7 +238,7 @@ HOME_HTML = '''
 </head>
 <body>
 <div class="glass">
-    <h1>🔗 KD Bypass API</h1>
+    <h1>🔗 Raj Bypass API</h1>
     <div class="badge">⚡ by @rajfflive</div>
     <div class="credit-box">
         <div>YOUR CREDITS</div>
@@ -303,7 +287,6 @@ HOME_HTML = '''
             resultDiv.innerHTML = '❌ API key and link required';
             return;
         }
-        // Disable button to prevent double-click
         btn.disabled = true;
         btn.innerText = '⏳ Processing...';
         resultDiv.style.display = 'block';
@@ -400,11 +383,13 @@ a{color:#00b4ff}
     </div>
     <div class="card">
         <h3>📋 All Keys <button onclick="location.reload()" style="background:#2a3a5a;padding:4px 12px">⟳ Refresh</button></h3>
-        <div style="overflow-x:auto"><tr><th>Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Expiry</th><th>Action</th></tr>
+        <div style="overflow-x:auto"><table><th>Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Expiry</th><th>Action</th></tr>
             {% for k,d in keys.items() %}
             <tr>
                 <td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></td>
-                <td>{{ d.credits }}</td><td>{{ d.used }}</td><td>{{ d.bypassed }}</td>
+                <td>{{ d.credits }}</td>
+                <td>{{ d.used }}</td>
+                <td>{{ d.bypassed }}</td>
                 <td>{{ d.expiry[:10] if d.expiry else 'Never' }}</td>
                 <td><button onclick="deleteKey('{{ k }}')" style="background:#ff4466">Delete</button></td>
             </tr>
@@ -422,7 +407,6 @@ document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let 
 </body></html>
 '''
 
-# ---------- Start ----------
 def start_telegram():
     async def main():
         await client.connect()
