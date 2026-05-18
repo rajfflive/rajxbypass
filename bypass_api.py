@@ -34,7 +34,7 @@ recent_requests = {}
 bypass_cache = OrderedDict()
 CACHE_TTL = 86400
 MAX_CACHE_SIZE = 2000
-CACHE_ENABLED = True  # can be toggled via admin
+CACHE_ENABLED = False  # <-- Cache disabled by default (tu admin panel se ON kar sakta hai)
 
 def get_cached(original):
     if not CACHE_ENABLED:
@@ -43,8 +43,9 @@ def get_cached(original):
         entry = bypass_cache[original]
         if time.time() - entry['ts'] < CACHE_TTL:
             bypass_cache.move_to_end(original)
+            # Safety check: never return if cached link is same as original
             if entry['bypassed'] == original:
-                print(f"[CACHE] Invalid entry, deleting")
+                print(f"[CACHE] Invalid cached entry (same as original), deleting")
                 del bypass_cache[original]
                 return None
             return entry['bypassed']
@@ -55,6 +56,7 @@ def get_cached(original):
 def set_cached(original, bypassed):
     if not CACHE_ENABLED:
         return
+    # Only cache if bypassed is different from original and valid destination
     if bypassed and bypassed != original and is_valid_destination(bypassed):
         bypass_cache[original] = {'bypassed': bypassed, 'ts': time.time()}
         if len(bypass_cache) > MAX_CACHE_SIZE:
@@ -62,6 +64,11 @@ def set_cached(original, bypassed):
         print(f"[CACHE] Stored: {original} -> {bypassed}")
     else:
         print(f"[CACHE] Not storing invalid: {original} -> {bypassed}")
+
+# --- Rest of functions (get_user, is_expired, deduct_credit, is_valid_destination, etc.) ---
+# (keep everything same as previous final working code)
+
+# [I'll include the full function definitions here, but to save space I'll note that they are identical to the previous message's working code. However, I'll write them out to ensure completeness.]
 
 def get_user(k):
     if k not in user_credits:
@@ -313,14 +320,13 @@ def bypass():
 @app.route('/credits')
 def credits():
     api_key = request.args.get('api_key')
-    if not api_key:
-        return jsonify({'status': False, 'error': 'Missing api_key', 'developer': '@rajfflive'})
+    if not api_key: return jsonify({'status': False, 'error': 'Missing api_key', 'developer': '@rajfflive'})
     u = get_user(api_key)
     return jsonify({'status': True, 'credits_remaining': u['credits'], 'total_used': u['used'],
                     'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']),
                     'expiry': u['expiry'], 'developer': '@rajfflive'})
 
-# ---------- Admin ----------
+# ---------- Admin routes (with toggle cache) ----------
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST':
@@ -348,15 +354,13 @@ def admin_logout():
 
 @app.route('/admin/generate', methods=['POST'])
 def admin_generate():
-    if not session.get('admin_logged_in'):
-        return jsonify({'status': False, 'error': 'Not logged in'})
+    if not session.get('admin_logged_in'): return jsonify({'status': False, 'error': 'Not logged in'})
     key_type = request.form.get('key_type', 'auto')
     if key_type == 'auto':
         api_key = generate_api_key()
     else:
         api_key = request.form.get('custom_key', '').strip()
-        if not api_key or api_key in user_credits:
-            return jsonify({'status': False, 'error': 'Invalid or duplicate'})
+        if not api_key or api_key in user_credits: return jsonify({'status': False, 'error': 'Invalid or duplicate'})
     credits = int(request.form.get('credits', 0))
     expiry_days = request.form.get('expiry_days')
     expiry = int(expiry_days) if expiry_days and expiry_days.isdigit() else None
@@ -365,19 +369,16 @@ def admin_generate():
 
 @app.route('/admin/add_credits', methods=['POST'])
 def admin_add_credits():
-    if not session.get('admin_logged_in'):
-        return jsonify({'status': False, 'error': 'Not logged in'})
+    if not session.get('admin_logged_in'): return jsonify({'status': False, 'error': 'Not logged in'})
     api_key = request.form.get('api_key')
     amount = int(request.form.get('amount', 0))
-    if not api_key or amount <= 0 or api_key not in user_credits:
-        return jsonify({'status': False, 'error': 'Invalid'})
+    if not api_key or amount <= 0 or api_key not in user_credits: return jsonify({'status': False, 'error': 'Invalid'})
     new_bal = add_credits(api_key, amount)
     return jsonify({'status': True, 'new_balance': new_bal})
 
 @app.route('/admin/delete_key', methods=['POST'])
 def admin_delete_key():
-    if not session.get('admin_logged_in'):
-        return jsonify({'status': False, 'error': 'Not logged in'})
+    if not session.get('admin_logged_in'): return jsonify({'status': False, 'error': 'Not logged in'})
     api_key = request.form.get('api_key')
     if api_key in user_credits:
         del user_credits[api_key]
@@ -386,20 +387,18 @@ def admin_delete_key():
 
 @app.route('/admin/clear_cache', methods=['POST'])
 def admin_clear_cache():
-    if not session.get('admin_logged_in'):
-        return jsonify({'status': False, 'error': 'Not logged in'})
+    if not session.get('admin_logged_in'): return jsonify({'status': False, 'error': 'Not logged in'})
     bypass_cache.clear()
     return jsonify({'status': True, 'message': 'Cache cleared'})
 
 @app.route('/admin/toggle_cache', methods=['POST'])
 def admin_toggle_cache():
-    if not session.get('admin_logged_in'):
-        return jsonify({'status': False, 'error': 'Not logged in'})
+    if not session.get('admin_logged_in'): return jsonify({'status': False, 'error': 'Not logged in'})
     global CACHE_ENABLED
     CACHE_ENABLED = not CACHE_ENABLED
     return jsonify({'status': True, 'cache_enabled': CACHE_ENABLED})
 
-# ---------- HTML Templates ----------
+# ---------- HTML Templates (same as previous, but included for completeness) ----------
 HOME_HTML = '''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Raj Bypass API</title><style>*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui}body{background:linear-gradient(135deg,#0a0f1e,#0a192f);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px}.glass{background:rgba(15,25,45,0.7);backdrop-filter:blur(12px);border-radius:32px;padding:32px;max-width:550px;width:100%;border:1px solid rgba(0,255,136,0.2)}h1{font-size:1.8rem;background:linear-gradient(135deg,#00ff88,#00b4ff);-webkit-background-clip:text;background-clip:text;color:transparent}.badge{background:#00ff8810;border:1px solid #00ff88;border-radius:40px;padding:6px 14px;font-size:0.8rem;color:#00ff88;display:inline-block;margin:15px 0}.credit-box{background:#0a0f1e;border-radius:20px;padding:16px;margin:20px 0;text-align:center;border:1px solid #2a3a5a}.credit-number{font-size:2rem;font-weight:bold;color:#00ff88}.stats-row{display:flex;justify-content:space-between;margin-top:10px;font-size:0.85rem}input,button{width:100%;padding:14px;margin:8px 0;border-radius:16px;border:none;font-size:1rem}input{background:#0a0f1e;border:1px solid #2a3a5a;color:white}input:focus{border-color:#00ff88}button{background:linear-gradient(135deg,#00ff88,#00b4ff);color:#0a0f1e;font-weight:bold;cursor:pointer}button:disabled{opacity:0.6}.result{background:#0a0f1e;border-radius:16px;padding:12px;margin-top:16px;word-break:break-all;border-left:3px solid #00ff88}.footer{margin-top:24px;font-size:0.75rem;text-align:center;color:#5a6e8a}a{color:#00b4ff}</style></head>
 <body><div class="glass"><h1>🔗 Raj Bypass API</h1><div class="badge">⚡ by @rajfflive</div><div class="credit-box"><div>YOUR CREDITS</div><div class="credit-number" id="creditCount">—</div><div id="expiryText"></div><div class="stats-row"><span>✅ Total Bypassed: <span id="totalBypassed">0</span></span><span>📊 Success Rate: <span id="successRate">0</span>%</span></div></div><input type="text" id="apiKeyInput" placeholder="Your API Key"><button onclick="generateKey()">✨ Generate New Key</button><button onclick="checkCredits()" style="background:#2a3a5a;color:white">⟳ Check Credits</button><hr style="margin:20px 0;border-color:#2a3a5a"><input type="text" id="linkInput" placeholder="Paste link to bypass..."><button id="bypassBtn" onclick="bypass()">🚀 Bypass Now</button><div id="result" class="result" style="display:none"></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive" target="_blank">💬 Support</a> | <a href="/admin">Admin</a></div></div><script>let apiKey=localStorage.getItem('api_key')||''; document.getElementById('apiKeyInput').value=apiKey; if(apiKey)checkCredits();async function generateKey(){ let k='user_'+Math.random().toString(36).substr(2,12); localStorage.setItem('api_key',k); document.getElementById('apiKeyInput').value=k; await checkCredits(); }async function checkCredits(){ let k=document.getElementById('apiKeyInput').value; if(!k)return; let r=await fetch(`/credits?api_key=${k}`); let d=await r.json(); if(d.status){ document.getElementById('creditCount').innerText=d.credits_remaining; document.getElementById('expiryText').innerText=d.expiry?`Expires: ${new Date(d.expiry).toLocaleDateString()}`:''; document.getElementById('totalBypassed').innerText=d.total_bypassed; document.getElementById('successRate').innerText=d.success_rate; }else document.getElementById('creditCount').innerText='Error'; }async function bypass(){ let k=document.getElementById('apiKeyInput').value; let link=document.getElementById('linkInput').value; let resultDiv=document.getElementById('result'); let btn=document.getElementById('bypassBtn'); if(!k||!link){ resultDiv.style.display='block'; resultDiv.innerHTML='❌ API key and link required'; return; } btn.disabled=true; btn.innerText='⏳ Processing...'; resultDiv.style.display='block'; resultDiv.innerHTML='⏳ Processing...'; try{ let r=await fetch('/bypass',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link,api_key:k})}); let d=await r.json(); if(d.status){ let cacheInfo = d.cached ? ' (from cache)' : ''; resultDiv.innerHTML=`✅ <strong>Bypassed${cacheInfo}</strong><br><a href="${d.bypassed_link}" target="_blank">${d.bypassed_link}</a><br>💎 Credits left: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; }else{ resultDiv.innerHTML=`❌ ${d.error}<br>💎 Credits: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; } await checkCredits(); }catch(e){ resultDiv.innerHTML='❌ Network error'; }finally{ btn.disabled=false; btn.innerText='🚀 Bypass Now'; } }document.getElementById('apiKeyInput').addEventListener('change',()=>{ localStorage.setItem('api_key',document.getElementById('apiKeyInput').value); checkCredits(); });</script></body></html>'''
@@ -435,7 +434,7 @@ th{color:#00ff88}
 a{color:#00b4ff;text-decoration:none}
 .badge{background:#00ff8822;color:#00ff88;padding:2px 10px;border-radius:20px;font-size:12px}
 </style></head>
-<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:rgba(255,255,255,0.2);color:white;padding:8px 16px;margin-left:10px">⟳ Refresh</button> <button onclick="clearCache()" class="danger-btn" style="padding:8px 16px">🗑️ Clear Cache</button> <button onclick="toggleCache()" class="success-btn" style="padding:8px 16px">{% if cache_enabled %}🔴 Disable Cache{% else %}🟢 Enable Cache{% endif %}</button></h3><div style="overflow-x:auto;margin-top:15px"><tr><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></div><div class="stat-number">{{ d.credits }}</div><div class="stat-number">{{ d.used }}</div><div class="stat-number">{{ d.bypassed }}</div><div class="stat-number">{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</div><div class="stat-number">{{ d.expiry[:10] if d.expiry else 'Never' }}</div><div class="stat-number"><button onclick="deleteKey('{{ k }}')" class="danger-btn" style="padding:6px 12px">Delete</button></div></tr>{% endfor %}</table></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>function copyKey(key,idx){ navigator.clipboard.writeText(key); alert('Copied: '+key); }async function deleteKey(key){ if(confirm('Delete this key?')){ let fd=new FormData(); fd.append('api_key',key); let r=await fetch('/admin/delete_key',{method:'POST',body:fd}); if(r.ok) location.reload(); else alert('Failed'); } }async function clearCache(){ if(confirm('Clear all cached bypass results?')){ let r=await fetch('/admin/clear_cache',{method:'POST'}); let d=await r.json(); if(d.status) alert('Cache cleared!'); else alert('Failed'); location.reload(); } }async function toggleCache(){ let r=await fetch('/admin/toggle_cache',{method:'POST'}); let d=await r.json(); if(d.status) location.reload(); else alert('Failed'); }document.getElementById('genForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/generate',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('genResult').innerHTML=`✅ Generated: ${d.api_key}<br>Credits: ${d.credits}<br>Expiry: ${d.expiry_days||'None'}<br><button onclick="navigator.clipboard.writeText('${d.api_key}')">📋 Copy Key</button>`; setTimeout(()=>location.reload(),1500); } else document.getElementById('genResult').innerHTML=`❌ ${d.error}`; };document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/add_credits',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('addResult').innerHTML=`✅ Added! New balance: ${d.new_balance}`; setTimeout(()=>location.reload(),1000); } else document.getElementById('addResult').innerHTML=`❌ ${d.error}`; };</script></body></html>'''
+<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:rgba(255,255,255,0.2);color:white;padding:8px 16px;margin-left:10px">⟳ Refresh</button> <button onclick="clearCache()" class="danger-btn" style="padding:8px 16px">🗑️ Clear Cache</button> <button onclick="toggleCache()" class="success-btn" style="padding:8px 16px">{% if cache_enabled %}🔴 Disable Cache{% else %}🟢 Enable Cache{% endif %}</button></h3><div style="overflow-x:auto;margin-top:15px"><table><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></div><div class="stat-number">{{ d.credits }}</div><div class="stat-number">{{ d.used }}</div><div class="stat-number">{{ d.bypassed }}</div><div class="stat-number">{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</div><div class="stat-number">{{ d.expiry[:10] if d.expiry else 'Never' }}</div><div class="stat-number"><button onclick="deleteKey('{{ k }}')" class="danger-btn" style="padding:6px 12px">Delete</button></div></tr>{% endfor %}</table></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>function copyKey(key,idx){ navigator.clipboard.writeText(key); alert('Copied: '+key); }async function deleteKey(key){ if(confirm('Delete this key?')){ let fd=new FormData(); fd.append('api_key',key); let r=await fetch('/admin/delete_key',{method:'POST',body:fd}); if(r.ok) location.reload(); else alert('Failed'); } }async function clearCache(){ if(confirm('Clear all cached bypass results?')){ let r=await fetch('/admin/clear_cache',{method:'POST'}); let d=await r.json(); if(d.status) alert('Cache cleared!'); else alert('Failed'); location.reload(); } }async function toggleCache(){ let r=await fetch('/admin/toggle_cache',{method:'POST'}); let d=await r.json(); if(d.status) location.reload(); else alert('Failed'); }document.getElementById('genForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/generate',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('genResult').innerHTML=`✅ Generated: ${d.api_key}<br>Credits: ${d.credits}<br>Expiry: ${d.expiry_days||'None'}<br><button onclick="navigator.clipboard.writeText('${d.api_key}')">📋 Copy Key</button>`; setTimeout(()=>location.reload(),1500); } else document.getElementById('genResult').innerHTML=`❌ ${d.error}`; };document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/add_credits',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('addResult').innerHTML=`✅ Added! New balance: ${d.new_balance}`; setTimeout(()=>location.reload(),1000); } else document.getElementById('addResult').innerHTML=`❌ ${d.error}`; };</script></body></html>'''
 
 # ---------- Start ----------
 def start_telegram():
