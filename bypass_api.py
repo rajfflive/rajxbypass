@@ -28,10 +28,9 @@ loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, loop=loop)
 
-# Data structures
 user_credits = {}
-pending_requests = {}  # {request_id: {'link': original_link, 'complete': False, 'result': None, 'created': timestamp}}
-recent_requests = {}   # duplicate prevention
+pending_requests = {}  # {req_id: {'link': original, 'complete': bool, 'result': dict, 'created': timestamp}}
+recent_requests = {}   # duplicate check
 
 def get_user(k):
     if k not in user_credits:
@@ -63,6 +62,10 @@ def generate_api_key():
 
 def success_rate(used, bypassed):
     return 0.0 if used == 0 else round((bypassed / used) * 100, 2)
+
+def run_async(coro):
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result(timeout=25)
 
 def clean_url(url):
     if not url: return None
@@ -98,13 +101,18 @@ def is_valid_bypass(original, candidate):
     return is_valid_destination(candidate)
 
 def extract_links_from_message(msg):
+    """Extract original and bypassed links from both bot formats."""
+    # Remove markdown artifacts
     msg = re.sub(r'\*\*+', '', msg)
     msg = re.sub(r'`', '', msg)
+    
+    # Patterns for original link
     src_patterns = [
         r'(?:Original Link|Source)\s*:?✅?\s*(https?://[^\s\n]+)',
         r'⛓\s*𝗢ʀɪɢɪɴᴀʟ\s*:?\s*(https?://[^\s\n]+)',
         r'Original\s*:\s*(https?://[^\s\n]+)'
     ]
+    # Patterns for bypassed link
     dst_patterns = [
         r'(?:Bypassed Link|Destination)\s*:?✅?\s*(https?://[^\s\n]+)',
         r'🎁\s*𝗕ʏᴩᴀꜱꜱᴇᴅ\s*:?\s*(https?://[^\s\n]+)',
@@ -125,16 +133,20 @@ def extract_links_from_message(msg):
                 break
             else:
                 dst = None
+    # Fallback: last URL in message
     if not dst:
         urls = re.findall(r'https?://[^\s\n]+', msg)
-        for u in reversed(urls):
-            cand = clean_url(u)
-            if cand and (not src or cand != src) and is_valid_destination(cand):
-                dst = cand
-                break
+        if urls:
+            dst = clean_url(urls[-1])
+    if not src and 'urls' in locals() and urls:
+        src = clean_url(urls[0])
+    
+    # Additional safety: if dst is same as src, discard
+    if dst and src and dst == src:
+        dst = None
     return src, dst
 
-# ---------- Telegram event handler ----------
+# ---------- Telegram Event Handler ----------
 @client.on(events.NewMessage(chats=BOT_LIST))
 async def handler(event):
     msg_text = event.message.text
@@ -143,25 +155,34 @@ async def handler(event):
     src, dst = extract_links_from_message(msg_text)
     if not dst:
         return
-    # Try to match with pending requests by original link
+    print(f"[EVENT] Received message from {event.chat_id}: src={src}, dst={dst}")
+    
+    # Try to match with pending requests
     for req_id, req in list(pending_requests.items()):
         if req['complete']:
             continue
-        # If the message contains the original link we are waiting for
+        # Match by original link if present in message
         if src and src == req['link']:
             req['result'] = {'original': src, 'bypassed': dst}
             req['complete'] = True
             print(f"[EVENT] Matched request {req_id} via src match")
             return
-        # Fallback: if no src but dst is different and request is recent (within 30 sec)
-        if not src and dst != req['link'] and time.time() - req['created'] < 30:
-            # Accept as response
+        # If no src in message but dst is valid and request is recent
+        if not src and dst and dst != req['link'] and time.time() - req['created'] < 25:
+            # Still accept if the message likely came after our request
             req['result'] = {'original': req['link'], 'bypassed': dst}
             req['complete'] = True
-            print(f"[EVENT] Matched request {req_id} via fallback (no src)")
+            print(f"[EVENT] Matched request {req_id} via fallback")
             return
+        # Additionally, if the message contains the same link we sent (for bots that echo)
+        if req['link'] in msg_text and dst and dst != req['link']:
+            req['result'] = {'original': req['link'], 'bypassed': dst}
+            req['complete'] = True
+            print(f"[EVENT] Matched request {req_id} via link in message")
+            return
+    print(f"[EVENT] No matching pending request for {dst}")
 
-# ---------- Flask routes ----------
+# ---------- Flask Routes ----------
 @app.route('/')
 def home():
     return render_template_string(HOME_HTML)
@@ -185,7 +206,7 @@ def bypass():
     if not link.startswith(('http://','https://')):
         link = 'https://' + link
 
-    # Deduplicate (5 sec)
+    # Duplicate within 5 sec
     req_key = f"{api_key}|{link}"
     now = time.time()
     if req_key in recent_requests and now - recent_requests[req_key] < 5:
@@ -200,7 +221,7 @@ def bypass():
         u = get_user(api_key)
         return jsonify({'status': False, 'error': err, 'credits': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
 
-    # Generate request ID
+    # Create pending request
     req_id = str(int(time.time() * 1000)) + secrets.token_hex(4)
     pending_requests[req_id] = {
         'link': link,
@@ -213,17 +234,14 @@ def bypass():
     async def send_to_bots():
         tasks = [client.send_message(bot, link) for bot in BOT_LIST]
         await asyncio.gather(*tasks)
-        # Auto-delete our messages after 60 seconds
-        # Not implemented for brevity, but can be added
-
+        print(f"[REQUEST] Sent link '{link}' to {BOT_LIST}")
     try:
         run_async(send_to_bots())
-        # Wait for response (max 20 sec)
-        start_wait = time.time()
-        while time.time() - start_wait < 20:
+        # Wait for response (max 20 seconds)
+        start_time = time.time()
+        while time.time() - start_time < 20:
             if pending_requests[req_id]['complete']:
                 result = pending_requests[req_id]['result']
-                # Clean up
                 del pending_requests[req_id]
                 u = get_user(api_key)
                 u['bypassed'] += 1
@@ -243,7 +261,7 @@ def bypass():
         u['used'] -= 1
         if req_id in pending_requests:
             del pending_requests[req_id]
-        return jsonify({'status': False, 'error': 'Bot did not respond within 20 seconds', 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
+        return jsonify({'status': False, 'error': 'No response from any bot within 20 seconds', 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
     except Exception as e:
         u = get_user(api_key)
         u['credits'] += 1
@@ -251,10 +269,6 @@ def bypass():
         if req_id in pending_requests:
             del pending_requests[req_id]
         return jsonify({'status': False, 'error': str(e), 'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
-
-def run_async(coro):
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=25)
 
 @app.route('/credits')
 def credits():
@@ -265,7 +279,7 @@ def credits():
                     'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']),
                     'expiry': u['expiry'], 'developer': '@rajfflive'})
 
-# ---------- Admin routes (same as before) ----------
+# ---------- Admin routes (same as previous) ----------
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST':
@@ -323,7 +337,7 @@ def admin_delete_key():
         return jsonify({'status': True})
     return jsonify({'status': False, 'error': 'Key not found'})
 
-# ---------- HTML templates (same as earlier) ----------
+# ---------- HTML Templates (same as before, keep unchanged) ----------
 HOME_HTML = '''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Raj Bypass API</title><style>*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui}body{background:linear-gradient(135deg,#0a0f1e,#0a192f);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px}.glass{background:rgba(15,25,45,0.7);backdrop-filter:blur(12px);border-radius:32px;padding:32px;max-width:550px;width:100%;border:1px solid rgba(0,255,136,0.2)}h1{font-size:1.8rem;background:linear-gradient(135deg,#00ff88,#00b4ff);-webkit-background-clip:text;background-clip:text;color:transparent}.badge{background:#00ff8810;border:1px solid #00ff88;border-radius:40px;padding:6px 14px;font-size:0.8rem;color:#00ff88;display:inline-block;margin:15px 0}.credit-box{background:#0a0f1e;border-radius:20px;padding:16px;margin:20px 0;text-align:center;border:1px solid #2a3a5a}.credit-number{font-size:2rem;font-weight:bold;color:#00ff88}.stats-row{display:flex;justify-content:space-between;margin-top:10px;font-size:0.85rem}input,button{width:100%;padding:14px;margin:8px 0;border-radius:16px;border:none;font-size:1rem}input{background:#0a0f1e;border:1px solid #2a3a5a;color:white}input:focus{border-color:#00ff88}button{background:linear-gradient(135deg,#00ff88,#00b4ff);color:#0a0f1e;font-weight:bold;cursor:pointer}button:disabled{opacity:0.6}.result{background:#0a0f1e;border-radius:16px;padding:12px;margin-top:16px;word-break:break-all;border-left:3px solid #00ff88}.footer{margin-top:24px;font-size:0.75rem;text-align:center;color:#5a6e8a}a{color:#00b4ff}</style></head>
 <body><div class="glass"><h1>🔗 Raj Bypass API</h1><div class="badge">⚡ by @rajfflive</div><div class="credit-box"><div>YOUR CREDITS</div><div class="credit-number" id="creditCount">—</div><div id="expiryText"></div><div class="stats-row"><span>✅ Total Bypassed: <span id="totalBypassed">0</span></span><span>📊 Success Rate: <span id="successRate">0</span>%</span></div></div><input type="text" id="apiKeyInput" placeholder="Your API Key"><button onclick="generateKey()">✨ Generate New Key</button><button onclick="checkCredits()" style="background:#2a3a5a;color:white">⟳ Check Credits</button><hr style="margin:20px 0;border-color:#2a3a5a"><input type="text" id="linkInput" placeholder="Paste link to bypass..."><button id="bypassBtn" onclick="bypass()">🚀 Bypass Now</button><div id="result" class="result" style="display:none"></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive" target="_blank">💬 Support</a> | <a href="/admin">Admin</a></div></div><script>let apiKey=localStorage.getItem('api_key')||''; document.getElementById('apiKeyInput').value=apiKey; if(apiKey)checkCredits();async function generateKey(){ let k='user_'+Math.random().toString(36).substr(2,12); localStorage.setItem('api_key',k); document.getElementById('apiKeyInput').value=k; await checkCredits(); }async function checkCredits(){ let k=document.getElementById('apiKeyInput').value; if(!k)return; let r=await fetch(`/credits?api_key=${k}`); let d=await r.json(); if(d.status){ document.getElementById('creditCount').innerText=d.credits_remaining; document.getElementById('expiryText').innerText=d.expiry?`Expires: ${new Date(d.expiry).toLocaleDateString()}`:''; document.getElementById('totalBypassed').innerText=d.total_bypassed; document.getElementById('successRate').innerText=d.success_rate; }else document.getElementById('creditCount').innerText='Error'; }async function bypass(){ let k=document.getElementById('apiKeyInput').value; let link=document.getElementById('linkInput').value; let resultDiv=document.getElementById('result'); let btn=document.getElementById('bypassBtn'); if(!k||!link){ resultDiv.style.display='block'; resultDiv.innerHTML='❌ API key and link required'; return; } btn.disabled=true; btn.innerText='⏳ Processing...'; resultDiv.style.display='block'; resultDiv.innerHTML='⏳ Processing...'; try{ let r=await fetch('/bypass',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({link:link,api_key:k})}); let d=await r.json(); if(d.status){ resultDiv.innerHTML=`✅ <strong>Bypassed</strong><br><a href="${d.bypassed_link}" target="_blank">${d.bypassed_link}</a><br>💎 Credits left: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; }else{ resultDiv.innerHTML=`❌ ${d.error}<br>💎 Credits: ${d.credits_remaining}<br>✅ Total bypassed: ${d.total_bypassed}<br>📊 Success rate: ${d.success_rate}%`; } await checkCredits(); }catch(e){ resultDiv.innerHTML='❌ Network error'; }finally{ btn.disabled=false; btn.innerText='🚀 Bypass Now'; } }document.getElementById('apiKeyInput').addEventListener('change',()=>{ localStorage.setItem('api_key',document.getElementById('apiKeyInput').value); checkCredits(); });</script></body></html>'''
@@ -358,7 +372,7 @@ th{color:#00ff88}
 a{color:#00b4ff;text-decoration:none}
 .badge{background:#00ff8822;color:#00ff88;padding:2px 10px;border-radius:20px;font-size:12px}
 </style></head>
-<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:rgba(255,255,255,0.2);color:white;padding:8px 16px;margin-left:10px">⟳ Refresh</button></h3><div style="overflow-x:auto;margin-top:15px"><table><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></div><div class="stat-number">{{ d.credits }}</div><div class="stat-number">{{ d.used }}</div><div class="stat-number">{{ d.bypassed }}</div><div class="stat-number">{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</div><div class="stat-number">{{ d.expiry[:10] if d.expiry else 'Never' }}</div><div class="stat-number"><button onclick="deleteKey('{{ k }}')" class="danger-btn" style="padding:6px 12px">Delete</button></div></tr>{% endfor %}</tr></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>function copyKey(key,idx){ navigator.clipboard.writeText(key); alert('Copied: '+key); }async function deleteKey(key){ if(confirm('Delete this key?')){ let fd=new FormData(); fd.append('api_key',key); let r=await fetch('/admin/delete_key',{method:'POST',body:fd}); if(r.ok) location.reload(); else alert('Failed'); } }document.getElementById('genForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/generate',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('genResult').innerHTML=`✅ Generated: ${d.api_key}<br>Credits: ${d.credits}<br>Expiry: ${d.expiry_days||'None'}<br><button onclick="navigator.clipboard.writeText('${d.api_key}')">📋 Copy Key</button>`; setTimeout(()=>location.reload(),1500); } else document.getElementById('genResult').innerHTML=`❌ ${d.error}`; };document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/add_credits',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('addResult').innerHTML=`✅ Added! New balance: ${d.new_balance}`; setTimeout(()=>location.reload(),1000); } else document.getElementById('addResult').innerHTML=`❌ ${d.error}`; };</script></body></html>'''
+<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:rgba(255,255,255,0.2);color:white;padding:8px 16px;margin-left:10px">⟳ Refresh</button></h3><div style="overflow-x:auto;margin-top:15px"><table><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th><tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></div><div class="stat-number">{{ d.credits }}</div><div class="stat-number">{{ d.used }}</div><div class="stat-number">{{ d.bypassed }}</div><div class="stat-number">{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</div><div class="stat-number">{{ d.expiry[:10] if d.expiry else 'Never' }}</div><div class="stat-number"><button onclick="deleteKey('{{ k }}')" class="danger-btn" style="padding:6px 12px">Delete</button></div></tr>{% endfor %}</table></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>function copyKey(key,idx){ navigator.clipboard.writeText(key); alert('Copied: '+key); }async function deleteKey(key){ if(confirm('Delete this key?')){ let fd=new FormData(); fd.append('api_key',key); let r=await fetch('/admin/delete_key',{method:'POST',body:fd}); if(r.ok) location.reload(); else alert('Failed'); } }document.getElementById('genForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/generate',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('genResult').innerHTML=`✅ Generated: ${d.api_key}<br>Credits: ${d.credits}<br>Expiry: ${d.expiry_days||'None'}<br><button onclick="navigator.clipboard.writeText('${d.api_key}')">📋 Copy Key</button>`; setTimeout(()=>location.reload(),1500); } else document.getElementById('genResult').innerHTML=`❌ ${d.error}`; };document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/add_credits',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('addResult').innerHTML=`✅ Added! New balance: ${d.new_balance}`; setTimeout(()=>location.reload(),1000); } else document.getElementById('addResult').innerHTML=`❌ ${d.error}`; };</script></body></html>'''
 
 # ---------- Start ----------
 def start_telegram():
