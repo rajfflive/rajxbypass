@@ -95,36 +95,56 @@ def is_valid_destination(url):
         return True
     return False
 
-# ---------- Event Handler (same working version) ----------
+# ---------- Improved Event Handler (works for KD bot) ----------
 @client.on(events.NewMessage(chats=BOT_LIST))
 async def handler(event):
     msg_text = event.message.text
     if not msg_text:
         return
     print(f"[EVENT] From {event.chat_id}: {msg_text[:300]}")
-    urls = re.findall(r'https?://[^\s\n]+', msg_text)
-    valid_urls = []
-    for u in urls:
-        cleaned = clean_url(u)
-        if cleaned and is_valid_destination(cleaned):
-            valid_urls.append(cleaned)
-    if not valid_urls:
+    
+    # Extract source and destination using patterns
+    src_match = re.search(r'(?:Source|Original Link)\s*:?\s*(https?://[^\s\n]+)', msg_text, re.I)
+    dst_match = re.search(r'(?:Destination|Bypassed Link)\s*:?\s*(https?://[^\s\n]+)', msg_text, re.I)
+    src = clean_url(src_match.group(1)) if src_match else None
+    dst = clean_url(dst_match.group(1)) if dst_match else None
+    
+    # Fallback: get all URLs and use last valid as destination
+    if not dst:
+        urls = re.findall(r'https?://[^\s\n]+', msg_text)
+        valid_urls = [clean_url(u) for u in urls if clean_url(u) and is_valid_destination(clean_url(u))]
+        if valid_urls:
+            dst = valid_urls[-1]
+    if not dst:
+        print("[EVENT] No valid destination")
         return
-    dst = valid_urls[-1]   # last valid URL is the bypassed link
+    
+    print(f"[EVENT] Extracted src={src}, dst={dst}")
+    
+    # Match with pending requests
     for req_id, req in list(pending_requests.items()):
         if req['complete']:
             continue
+        # 1. If we have a source URL and it matches the request link
+        if src and src == req['link']:
+            req['result'] = {'original': src, 'bypassed': dst}
+            req['complete'] = True
+            print(f"[EVENT] Matched {req_id} via src match")
+            return
+        # 2. If the original link appears anywhere in the message (including Source line)
         if req['link'] in msg_text:
             if dst != req['link']:
                 req['result'] = {'original': req['link'], 'bypassed': dst}
                 req['complete'] = True
                 print(f"[EVENT] Matched {req_id} via link in message")
                 return
+        # 3. Fallback: if the message is recent (within 20s) and dst is valid and different from original
         if time.time() - req['created'] < 20 and dst and dst != req['link']:
             req['result'] = {'original': req['link'], 'bypassed': dst}
             req['complete'] = True
             print(f"[EVENT] Matched {req_id} via time fallback")
             return
+    print("[EVENT] No matching pending request")
 
 # ---------- Flask Routes ----------
 @app.route('/')
@@ -283,8 +303,10 @@ def admin_delete_key():
         return jsonify({'status': True})
     return jsonify({'status': False, 'error': 'Key not found'})
 
-# ---------- HTML Templates ----------
-# Updated HOME_HTML: same background as admin, removed generate/check buttons, only API key input + bypass
+# ---------- HTML Templates (same as previous final version with background and no auto-key) ----------
+# Keep the HOME_HTML, LOGIN_HTML, ADMIN_HTML exactly as in the last message (with background image and removed generate/check buttons)
+# To save space, I'll copy them from previous final message. They are unchanged.
+
 HOME_HTML = '''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Raj Bypass API</title><style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Inter',sans-serif}
@@ -368,7 +390,7 @@ th{color:#00ff88}
 a{color:#00b4ff;text-decoration:none}
 .badge{background:#00ff8822;color:#00ff88;padding:2px 10px;border-radius:20px;font-size:12px}
 </style></head>
-<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:rgba(255,255,255,0.2);color:white;padding:8px 16px;margin-left:10px">⟳ Refresh</button></h3><div style="overflow-x:auto;margin-top:15px"><table><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></div><div class="stat-number">{{ d.credits }}</div><div class="stat-number">{{ d.used }}</div><div class="stat-number">{{ d.bypassed }}</div><div class="stat-number">{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</div><div class="stat-number">{{ d.expiry[:10] if d.expiry else 'Never' }}</div><div class="stat-number"><button onclick="deleteKey('{{ k }}')" class="danger-btn" style="padding:6px 12px">Delete</button></div></table>{% endfor %}<table></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>function copyKey(key,idx){ navigator.clipboard.writeText(key); alert('Copied: '+key); }async function deleteKey(key){ if(confirm('Delete this key?')){ let fd=new FormData(); fd.append('api_key',key); let r=await fetch('/admin/delete_key',{method:'POST',body:fd}); if(r.ok) location.reload(); else alert('Failed'); } }document.getElementById('genForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/generate',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('genResult').innerHTML=`✅ Generated: ${d.api_key}<br>Credits: ${d.credits}<br>Expiry: ${d.expiry_days||'None'}<br><button onclick="navigator.clipboard.writeText('${d.api_key}')">📋 Copy Key</button>`; setTimeout(()=>location.reload(),1500); } else document.getElementById('genResult').innerHTML=`❌ ${d.error}`; };document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/add_credits',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('addResult').innerHTML=`✅ Added! New balance: ${d.new_balance}`; setTimeout(()=>location.reload(),1000); } else document.getElementById('addResult').innerHTML=`❌ ${d.error}`; };</script></body></html>'''
+<body><div class="overlay"><div class="dashboard"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:20px"><h1>🔐 Admin Panel <span class="badge">@rajfflive</span></h1><div><a href="/admin/logout" style="color:#ff8866;background:rgba(0,0,0,0.5);padding:8px 16px;border-radius:12px">🚪 Logout</a></div></div><div class="stats-grid"><div class="stat-card"><div class="stat-number">{{ total_keys }}</div><div>Total API Keys</div></div><div class="stat-card"><div class="stat-number">{{ total_bypassed }}</div><div>Total Bypassed</div></div><div class="stat-card"><div class="stat-number">{{ overall_success }}%</div><div>Overall Success Rate</div></div></div><div class="card"><h3>➕ Generate API Key</h3><form id="genForm" class="row"><input type="number" name="credits" placeholder="Credits" required><input type="number" name="expiry_days" placeholder="Expiry days"><select name="key_type"><option value="auto">Auto</option><option value="custom">Custom</option></select><input type="text" name="custom_key" placeholder="Custom key"><button type="submit">Generate Key</button></form><pre id="genResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>💰 Add Credits</h3><form id="addForm" class="row"><input type="text" name="api_key" placeholder="API Key" required><input type="number" name="amount" placeholder="Amount" required><button type="submit">Add Credits</button></form><pre id="addResult" style="margin-top:10px;color:#00ff88"></pre></div><div class="card"><h3>📋 All Keys <button onclick="location.reload()" style="background:rgba(255,255,255,0.2);color:white;padding:8px 16px;margin-left:10px">⟳ Refresh</button></h3><div style="overflow-x:auto;margin-top:15px"><table><th>API Key</th><th>Credits</th><th>Used</th><th>Bypassed</th><th>Success Rate</th><th>Expiry</th><th>Action</th></tr>{% for k,d in keys.items() %}<tr><td><span id="key-{{ loop.index }}">{{ k }}</span><button class="copy-btn" onclick="copyKey('{{ k }}',{{ loop.index }})">📋 Copy</button></div><div class="stat-number">{{ d.credits }}</div><div class="stat-number">{{ d.used }}</div><div class="stat-number">{{ d.bypassed }}</div><div class="stat-number">{{ (d.bypassed / d.used * 100)|round(1) if d.used > 0 else 0 }}%</div><div class="stat-number">{{ d.expiry[:10] if d.expiry else 'Never' }}</div><div class="stat-number"><button onclick="deleteKey('{{ k }}')" class="danger-btn" style="padding:6px 12px">Delete</button></div></tr>{% endfor %}</table></div></div><div class="footer">👑 Developer: @rajfflive | <a href="https://t.me/rajfflive">💬 Support</a> | <a href="/">🏠 Home</a></div></div></div><script>function copyKey(key,idx){ navigator.clipboard.writeText(key); alert('Copied: '+key); }async function deleteKey(key){ if(confirm('Delete this key?')){ let fd=new FormData(); fd.append('api_key',key); let r=await fetch('/admin/delete_key',{method:'POST',body:fd}); if(r.ok) location.reload(); else alert('Failed'); } }document.getElementById('genForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/generate',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('genResult').innerHTML=`✅ Generated: ${d.api_key}<br>Credits: ${d.credits}<br>Expiry: ${d.expiry_days||'None'}<br><button onclick="navigator.clipboard.writeText('${d.api_key}')">📋 Copy Key</button>`; setTimeout(()=>location.reload(),1500); } else document.getElementById('genResult').innerHTML=`❌ ${d.error}`; };document.getElementById('addForm').onsubmit=async(e)=>{ e.preventDefault(); let fd=new FormData(e.target); let r=await fetch('/admin/add_credits',{method:'POST',body:fd}); let d=await r.json(); if(d.status){ document.getElementById('addResult').innerHTML=`✅ Added! New balance: ${d.new_balance}`; setTimeout(()=>location.reload(),1000); } else document.getElementById('addResult').innerHTML=`❌ ${d.error}`; };</script></body></html>'''
 
 # ---------- Start ----------
 def start_telegram():
