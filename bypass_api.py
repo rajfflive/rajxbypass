@@ -29,8 +29,8 @@ asyncio.set_event_loop(loop)
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH, loop=loop)
 
 user_credits = {}
-pending_requests = {}
 recent_requests = {}
+pending_requests = {}   # store per request with original link
 
 def get_user(k):
     if k not in user_credits:
@@ -95,57 +95,17 @@ def is_valid_destination(url):
         return True
     return False
 
-# ---------- Event Handler ----------
-@client.on(events.NewMessage(chats=BOT_LIST))
-async def handler(event):
-    msg = event.message
-    msg_text = msg.text
-    if not msg_text:
-        return
-    print(f"[EVENT] From {event.chat_id}: {msg_text[:300]}")
-    
+def extract_src_dst(msg_text):
+    """Extract source and destination from bot message"""
     src_match = re.search(r'(?:Source|Original Link)\s*:?\s*(https?://[^\s\n]+)', msg_text, re.I)
     dst_match = re.search(r'(?:Destination|Bypassed Link)\s*:?\s*(https?://[^\s\n]+)', msg_text, re.I)
     src = clean_url(src_match.group(1)) if src_match else None
     dst = clean_url(dst_match.group(1)) if dst_match else None
-    
     if not dst:
         urls = re.findall(r'https?://[^\s\n]+', msg_text)
         if urls:
             dst = clean_url(urls[-1])
-    if not dst:
-        return
-    
-    print(f"[EVENT] Extracted src={src}, dst={dst}")
-    
-    # Auto-delete bot's response after 60 seconds
-    async def del_msg():
-        await asyncio.sleep(60)
-        try:
-            await msg.delete()
-        except:
-            pass
-    asyncio.create_task(del_msg())
-    
-    for req_id, req in list(pending_requests.items()):
-        if req['complete']:
-            continue
-        if src and src == req['link']:
-            req['result'] = {'original': src, 'bypassed': dst}
-            req['complete'] = True
-            print(f"[EVENT] Matched {req_id} via src match")
-            return
-        if req['link'] in msg_text and dst != req['link']:
-            req['result'] = {'original': req['link'], 'bypassed': dst}
-            req['complete'] = True
-            print(f"[EVENT] Matched {req_id} via link in message")
-            return
-        if time.time() - req['created'] < 20 and dst and dst != req['link']:
-            req['result'] = {'original': req['link'], 'bypassed': dst}
-            req['complete'] = True
-            print(f"[EVENT] Matched {req_id} via time fallback")
-            return
-    print("[EVENT] No matching request")
+    return src, dst
 
 # ---------- Flask Routes ----------
 @app.route('/')
@@ -171,7 +131,7 @@ def bypass():
     if not link.startswith(('http://','https://')):
         link = 'https://' + link
 
-    # Duplicate prevention
+    # Duplicate prevention (5 sec)
     req_key = f"{api_key}|{link}"
     now = time.time()
     if req_key in recent_requests and now - recent_requests[req_key] < 5:
@@ -188,7 +148,7 @@ def bypass():
                         'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']),
                         'developer': '@rajfflive'})
 
-    # Create request
+    # Create pending request
     req_id = str(int(time.time() * 1000)) + secrets.token_hex(4)
     pending_requests[req_id] = {
         'link': link,
@@ -197,7 +157,8 @@ def bypass():
         'created': time.time()
     }
 
-    async def send_to_bots():
+    async def send_and_poll():
+        # Send to all bots
         for bot in BOT_LIST:
             sent = await client.send_message(bot, link)
             # Auto-delete our message after 60 seconds
@@ -210,35 +171,76 @@ def bypass():
             asyncio.create_task(del_own())
         print(f"[REQUEST] Sent '{link}' to {BOT_LIST}")
 
+        # Poll for 20 seconds
+        for _ in range(20):
+            await asyncio.sleep(1)
+            # Check if request already completed (by event handler fallback)
+            if pending_requests.get(req_id, {}).get('complete'):
+                return True
+            # Poll each bot's recent messages
+            for bot in BOT_LIST:
+                try:
+                    msgs = await client.get_messages(bot, limit=3)
+                except:
+                    continue
+                for msg in msgs:
+                    if msg.text:
+                        src, dst = extract_src_dst(msg.text)
+                        # Match by source
+                        if src and src == link:
+                            # Auto-delete bot response
+                            async def del_resp():
+                                await asyncio.sleep(60)
+                                try:
+                                    await msg.delete()
+                                except:
+                                    pass
+                            asyncio.create_task(del_resp())
+                            pending_requests[req_id]['result'] = {'original': src, 'bypassed': dst}
+                            pending_requests[req_id]['complete'] = True
+                            print(f"[POLL] Matched {req_id} via src match from {bot}")
+                            return True
+                        # If no source but link appears in message
+                        if link in msg.text and dst and dst != link:
+                            async def del_resp2():
+                                await asyncio.sleep(60)
+                                try:
+                                    await msg.delete()
+                                except:
+                                    pass
+                            asyncio.create_task(del_resp2())
+                            pending_requests[req_id]['result'] = {'original': link, 'bypassed': dst}
+                            pending_requests[req_id]['complete'] = True
+                            print(f"[POLL] Matched {req_id} via link in message from {bot}")
+                            return True
+        return False
+
     try:
-        run_async(send_to_bots())
-        # Wait for response (20 seconds) – using time.sleep, NOT await
-        start_time = time.time()
-        while time.time() - start_time < 20:
-            if pending_requests[req_id]['complete']:
-                result = pending_requests[req_id]['result']
-                del pending_requests[req_id]
-                u = get_user(api_key)
-                u['bypassed'] += 1
-                return jsonify({
-                    'status': True,
-                    'original_link': result['original'],
-                    'bypassed_link': result['bypassed'],
-                    'credits_remaining': u['credits'],
-                    'total_bypassed': u['bypassed'],
-                    'success_rate': success_rate(u['used'], u['bypassed']),
-                    'developer': '@rajfflive'
-                })
-            time.sleep(0.5)   # <-- FIXED: time.sleep instead of await
-        # Timeout
-        u = get_user(api_key)
-        u['credits'] += 1
-        u['used'] -= 1
-        if req_id in pending_requests:
+        success = run_async(send_and_poll())
+        if success:
+            result = pending_requests[req_id]['result']
             del pending_requests[req_id]
-        return jsonify({'status': False, 'error': 'No response from any bot within 20 seconds',
-                        'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'],
-                        'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
+            u = get_user(api_key)
+            u['bypassed'] += 1
+            return jsonify({
+                'status': True,
+                'original_link': result['original'],
+                'bypassed_link': result['bypassed'],
+                'credits_remaining': u['credits'],
+                'total_bypassed': u['bypassed'],
+                'success_rate': success_rate(u['used'], u['bypassed']),
+                'developer': '@rajfflive'
+            })
+        else:
+            # Refund credit
+            u = get_user(api_key)
+            u['credits'] += 1
+            u['used'] -= 1
+            if req_id in pending_requests:
+                del pending_requests[req_id]
+            return jsonify({'status': False, 'error': 'No response from any bot within 20 seconds',
+                            'credits_remaining': u['credits'], 'total_bypassed': u['bypassed'],
+                            'success_rate': success_rate(u['used'], u['bypassed']), 'developer': '@rajfflive'})
     except Exception as e:
         u = get_user(api_key)
         u['credits'] += 1
@@ -259,7 +261,7 @@ def credits():
                     'total_bypassed': u['bypassed'], 'success_rate': success_rate(u['used'], u['bypassed']),
                     'expiry': u['expiry'], 'developer': '@rajfflive'})
 
-# ---------- Admin routes (unchanged) ----------
+# ---------- Admin routes (same as before, no changes) ----------
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST':
@@ -317,7 +319,7 @@ def admin_delete_key():
         return jsonify({'status': True})
     return jsonify({'status': False, 'error': 'Key not found'})
 
-# ---------- HTML Templates ----------
+# ---------- HTML Templates (same as before) ----------
 HOME_HTML = '''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Raj Bypass API</title><style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Inter',sans-serif}
